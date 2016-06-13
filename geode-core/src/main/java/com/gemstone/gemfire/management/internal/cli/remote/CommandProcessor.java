@@ -90,13 +90,14 @@ public class CommandProcessor {
 
     CommentSkipHelper commentSkipper = new CommentSkipHelper();
     String commentLessLine = commentSkipper.skipComments(cmdStmt.getCommandString());
+    // TODO:
     if (commentLessLine != null && !commentLessLine.isEmpty()) {
       CommandExecutionContext.setShellEnv(cmdStmt.getEnv());
 
       final RemoteExecutionStrategy executionStrategy = getExecutionStrategy();
       try {
         ParseResult parseResult = ((CommandStatementImpl)cmdStmt).getParseResult();
-        
+
         if (parseResult == null) {
           parseResult = parseCommand(commentLessLine);
           if (parseResult == null) {//TODO-Abhishek: Handle this in GfshParser Implementation
