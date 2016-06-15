@@ -29,9 +29,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.StringTokenizer;
 
+import org.apache.commons.lang.StringUtils;
+
 import com.gemstone.gemfire.InternalGemFireException;
 import com.gemstone.gemfire.InvalidValueException;
 import com.gemstone.gemfire.UnmodifiableException;
+import com.gemstone.gemfire.distributed.SSLEnabledComponents;
 import com.gemstone.gemfire.internal.AbstractConfig;
 import com.gemstone.gemfire.internal.ConfigSource;
 import com.gemstone.gemfire.internal.SocketCreator;
@@ -367,12 +370,9 @@ public abstract class AbstractDistributionConfig extends AbstractConfig implemen
     // Minimum 3 ports are required to start a Gemfire data node,
     // One for each, UDP, FD_SOCk protocols and Cache Server.
     if (value[1] - value[0] < 2) {
-      throw new IllegalArgumentException(LocalizedStrings.AbstractDistributionConfig_COULD_NOT_SET_0_TO_1_BECAUSE_ITS_VALUE_CAN_NOT_BE_LESS_THAN_2.
-                                                                                                                                                    toLocalizedString(new Object[] {
-                                                                                                                                                      MEMBERSHIP_PORT_RANGE,
-                                                                                                                                                      value[0] + "-" + value[1],
-                                                                                                                                                      Integer.valueOf(3)
-                                                                                                                                                    }));
+      throw new IllegalArgumentException(LocalizedStrings.AbstractDistributionConfig_COULD_NOT_SET_0_TO_1_BECAUSE_ITS_VALUE_CAN_NOT_BE_LESS_THAN_2.toLocalizedString(new Object[] {
+        MEMBERSHIP_PORT_RANGE, value[0] + "-" + value[1], Integer.valueOf(3)
+      }));
     }
     return value;
   }
@@ -463,6 +463,45 @@ public abstract class AbstractDistributionConfig extends AbstractConfig implemen
       throw new IllegalArgumentException(LocalizedStrings.AbstractDistributionConfig_REDIS_BIND_ADDRESS_0_INVALID_MUST_BE_IN_1.toLocalizedString(new Object[] {
         value, SocketCreator.getMyAddresses()
       }));
+    }
+    return value;
+  }
+
+  /**
+   * First check if sslComponents are in the list of valid components. If so, check that no other *-ssl-* properties other than cluster-ssl-* are set.
+   * This would mean one is mixing the "old" with the "new"
+   */
+  @ConfigAttributeChecker(name = SSL_ENABLED_COMPONENTS)
+  protected String checkLegacySSLWhenSSLEnabledComponentsSet(String value) {
+    if (value != null && value.length() > 0) {
+      String[] components = value.split(",");
+      for (String component : components) {
+        switch (component) {
+          case SSLEnabledComponents.ALL:
+          case SSLEnabledComponents.CLUSTER:
+          case SSLEnabledComponents.SERVER:
+          case SSLEnabledComponents.GATEWAY:
+          case SSLEnabledComponents.JMX:
+          case SSLEnabledComponents.HTTP_SERVICE:
+            continue;
+          default:
+            throw new IllegalArgumentException(LocalizedStrings.AbstractDistributionConfig_SSL_ENABLED_COMPONENTS_0_INVALID_TRY_1.toLocalizedString(new Object[] {
+              value, StringUtils.join(new String[] {
+              SSLEnabledComponents.ALL,
+              SSLEnabledComponents.CLUSTER,
+              SSLEnabledComponents.SERVER,
+              SSLEnabledComponents.GATEWAY,
+              SSLEnabledComponents.JMX,
+              SSLEnabledComponents.HTTP_SERVICE
+            }, ",")
+            }));
+        }
+      }
+      if(getJmxManagerSSLEnabled() || getHttpServiceSSLEnabled() || getServerSSLEnabled() || getGatewaySSLEnabled())
+      {
+        throw new IllegalArgumentException(LocalizedStrings.AbstractDistributionConfig_SSL_ENABLED_COMPONENTS_SET_INVALID_DEPRECATED_SSL_SET
+          .toLocalizedString());
+      }
     }
     return value;
   }
@@ -921,6 +960,8 @@ public abstract class AbstractDistributionConfig extends AbstractConfig implemen
     m.put(DISTRIBUTED_TRANSACTIONS, "Flag to indicate whether all transactions including JTA should be distributed transactions.  Default is false, meaning colocated transactions.");
 
     m.put(SECURITY_SHIRO_INIT, "The name of the shiro configuration file in the classpath, e.g. shiro.ini");
+
+    m.put(SSL_ENABLED_COMPONENTS,"A comma delimited list of components that require SSL communications");
 
     dcAttDescriptions = Collections.unmodifiableMap(m);
 
