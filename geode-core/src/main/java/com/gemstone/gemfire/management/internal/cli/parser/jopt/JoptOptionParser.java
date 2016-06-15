@@ -115,7 +115,7 @@ public class JoptOptionParser implements GfshOptionParser {
     optionSet.setUserInput(userInput!=null?userInput.trim():"");
     if (userInput != null) {
       TrimmedInput input = PreprocessorUtils.trim(userInput);
-      String[] preProcessedInput = preProcess(new OptionJFormatter().formatCommand(input.getString()));
+      String[] preProcessedInput = preProcess(new OptionJFormatter().formatCommand(input.getString())); // TODO: use OptionJFormatter
       joptsimple.OptionSet joptOptionSet = null;
       CliCommandOptionException ce = null;
       // int factor = 0;
@@ -123,22 +123,21 @@ public class JoptOptionParser implements GfshOptionParser {
         joptOptionSet = parser.parse(preProcessedInput);
       } catch (OptionException e) {
         ce = processException(e);
-        // KIRK: joptOptionSet = e.getDetected();
+        // TODO:KIRK: joptOptionSet = e.getDetected(); // TODO: removed when geode-joptsimple was removed
       }
       if (joptOptionSet != null) {
 
         // Make sure there are no miscellaneous, unknown strings that cannot be identified as
         // either options or arguments.
         if (joptOptionSet.nonOptionArguments().size() > arguments.size()) {
-          // KIRK: String unknownString = joptOptionSet.nonOptionArguments().get(arguments.size());
-          String unknownString = (String)joptOptionSet.nonOptionArguments().get(arguments.size());
+          String unknownString = (String)joptOptionSet.nonOptionArguments().get(arguments.size()); // TODO: added cast when geode-joptsimple was removed
           // If the first option is un-parseable then it will be returned as "<option>=<value>" since it's
           // been interpreted as an argument. However, all subsequent options will be returned as "<option>".
           // This hack splits off the string before the "=" sign if it's the first case.
           if (unknownString.matches("^-*\\w+=.*$")) {
             unknownString = unknownString.substring(0, unknownString.indexOf('='));
           }
-          // KIRK: ce = processException(OptionException.createUnrecognizedOptionException(unknownString, joptOptionSet));
+          // TODO:KIRK: ce = processException(OptionException.createUnrecognizedOptionException(unknownString, joptOptionSet)); // TODO: removed when geode-joptsimple was removed
         }
         
         // First process the arguments
@@ -200,7 +199,7 @@ public class JoptOptionParser implements GfshOptionParser {
                   if (arguments.size() > 1 && !(option.getConverter() instanceof MultipleValueConverter) && option.getValueSeparator() == null) {
                     List<String> optionList = new ArrayList<String>(1);
                     optionList.add(string);
-                    // KIRK: ce = processException(new MultipleArgumentsForOptionException(optionList, joptOptionSet));
+                    // TODO:KIRK: ce = processException(new MultipleArgumentsForOptionException(optionList, joptOptionSet)); // TODO: removed when geode-joptsimple was removed
                   } else if ((arguments.size() == 1 && !(option.getConverter() instanceof MultipleValueConverter)) || option.getValueSeparator() == null) {
                     optionSet.put(option, arguments.get(0).toString().trim());
                   } else {

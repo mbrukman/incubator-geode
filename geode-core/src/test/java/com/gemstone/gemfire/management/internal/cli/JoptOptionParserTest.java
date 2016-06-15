@@ -39,7 +39,7 @@ import com.gemstone.gemfire.management.internal.cli.parser.jopt.JoptOptionParser
 import com.gemstone.gemfire.test.junit.categories.UnitTest;
 
 @Category(UnitTest.class)
-//@RunWith(JUnitParamsRunner.class)
+@RunWith(JUnitParamsRunner.class)
 public class JoptOptionParserTest {
 
   private JoptOptionParser emptyOptionParser;
@@ -223,7 +223,7 @@ public class JoptOptionParserTest {
   }
 
   @Test
-  public void parseInputWithUndefinedArgumentShouldThrow() throws Exception {
+  public void parseInputWithUndefinedArgumentShouldNotThrow() throws Exception {
     LinkedList<Argument> arguments = new LinkedList<>();
     LinkedList<Option> options = new LinkedList<>();
 
@@ -233,7 +233,8 @@ public class JoptOptionParserTest {
     optionParser.setArguments(arguments);
     optionParser.setOptions(options);
 
-    assertThatThrownBy(() -> optionParser.parse("command1 argument1_value? argument2_value")).isOfAnyClassIn(CliCommandOptionNotApplicableException.class);
+    OptionSet optionSet = optionParser.parse("command1 argument1_value? argument2_value");
+    assertThat(optionSet.getUserInput()).isEqualTo("command1 argument1_value? argument2_value");
   }
 
   @Test
@@ -287,8 +288,8 @@ public class JoptOptionParserTest {
     assertThat(optionSet.hasOption(this.requiredOption)).isFalse();
   }
 
-//  @Test
-//  @Parameters(method = "exampleInputParameters")
+  @Test
+  @Parameters(method = "exampleInputParameters")
   public void parseInputWithExampleInputParametesr(String command, boolean expectException, boolean hasArguments, boolean hasOptions) throws Exception {
     if (expectException) {
       assertThatThrownBy(() -> this.exampleOptionParser.parse(command)).isExactlyInstanceOf(CliCommandOptionMissingException.class);

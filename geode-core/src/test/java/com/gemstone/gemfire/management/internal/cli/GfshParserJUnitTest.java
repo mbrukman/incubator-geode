@@ -136,13 +136,6 @@ public class GfshParserJUnitTest {
     CommandManager.clearInstance();
   }
 
-  @Test
-  public void testStartLocator() throws Exception {
-    //String input = "start locator --name=loc1 --J=-Dgemfire.http-service-port=8080";
-    String input = "start locator --name=loc1";
-    ParseResult parse = parser.parse(input);
-  }
-
   /**
    * Tests the auto-completion capability of {@link GfshParser} with the method
    * {@link GfshParser#complete(String, int, List)}
@@ -197,54 +190,6 @@ public class GfshParserJUnitTest {
       if (completion.getValue().startsWith(ARGUMENT1_COMPLETIONS[0].getValue().substring(0, 3))) {
         completionValues.add(" " + completion.getValue());
       }
-    }
-    assertSimpleCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name and first argument
-    input = command1Names[0] + " " + ARGUMENT1_COMPLETIONS[0].getValue();
-    clearAndSimpleComplete(completionCandidates, completionValues, input, parser);
-
-    // Here we expect the completions for argument2
-    for (Completion completion : ARGUMENT2_COMPLETIONS) {
-      completionValues.add(SyntaxConstants.ARGUMENT_SEPARATOR + completion.getValue());
-    }
-    assertSimpleCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name, first argument and the prefix of second
-    // argument
-    input = command1Names[0] + " " + ARGUMENT1_COMPLETIONS[0].getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + ARGUMENT2_COMPLETIONS[0]
-      .getValue()
-      .substring(0, 2);
-    clearAndSimpleComplete(completionCandidates, completionValues, input, parser);
-    // Here we expect the completions for argument2
-    for (Completion completion : ARGUMENT2_COMPLETIONS) {
-      if (completion.getValue().startsWith(ARGUMENT2_COMPLETIONS[0].getValue().substring(0, 2))) {
-        completionValues.add(SyntaxConstants.ARGUMENT_SEPARATOR + completion.getValue());
-      }
-    }
-    assertSimpleCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name, first argument and second argument
-    input = COMMAND1_NAME + " " + ARGUMENT1_COMPLETIONS[0].getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + ARGUMENT2_COMPLETIONS[0]
-      .getValue();
-    clearAndSimpleComplete(completionCandidates, completionValues, input, parser);
-    // Here we expect all the mandatory options
-    completionValues.add(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION1_NAME);
-    assertSimpleCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name (synonym), first argument, second argument,
-    // prefix of first option
-    input = command1Names[1] + " " + ARGUMENT1_COMPLETIONS[0].getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + ARGUMENT2_COMPLETIONS[0]
-      .getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION1_NAME.substring(0, 3);
-    clearAndSimpleComplete(completionCandidates, completionValues, input, parser);
-    // Here we expect the names for all the options
-    // whose prefix matches with the provided prefix
-    completionValues.add(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION1_NAME);
-    if (OPTION2_NAME.startsWith(OPTION1_NAME.substring(0, 3))) {
-      completionValues.add(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION2_NAME);
-    }
-    if (OPTION3_NAME.startsWith(OPTION1_NAME.substring(0, 3))) {
-      completionValues.add(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION3_NAME);
     }
     assertSimpleCompletionValues(completionValues, completionCandidates);
 
@@ -322,23 +267,6 @@ public class GfshParserJUnitTest {
     clearAndSimpleComplete(completionCandidates, completionValues, input, parser);
     // Here we expect nothing for completion
     assertSimpleCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name, first argument, second argument,
-    // first option and multiple values assigned to it. It also contains
-    // start of the second option
-    input = command1Names[0] + " " + ARGUMENT1_COMPLETIONS[0].getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + ARGUMENT2_COMPLETIONS[0]
-      .getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + " " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION1_NAME + SyntaxConstants.OPTION_VALUE_SPECIFIER + OPTION1_COMPLETIONS[0]
-              .getValue() + SyntaxConstants.VALUE_SEPARATOR + OPTION1_COMPLETIONS[1].getValue() + " " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION2_NAME
-              .substring(0, 3);
-    clearAndSimpleComplete(completionCandidates, completionValues, input, parser);
-    // Here we expect those options which have not been specified
-    // before and which have the prefix specified herein as their
-    // prefix
-    completionValues.add(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION2_NAME);
-    if (OPTION3_NAME.startsWith(OPTION2_NAME.substring(0, 3))) {
-      completionValues.add(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION3_NAME);
-    }
-    assertSimpleCompletionValues(completionValues, completionCandidates);
   }
 
   private void clearAndSimpleComplete(List<String> completionCandidates,
@@ -353,10 +281,6 @@ public class GfshParserJUnitTest {
   private void assertSimpleCompletionValues(List<String> expected, List<String> actual) {
     assertEquals("Check size", expected.size(), actual.size());
     assertEquals(expected, actual);
-//    for (int i = 0; i < expected.size(); i++) {
-//      assertEquals("Check completion value no." + i + ". Expected(" + expected.get(i) + ") & Actual(" + actual.get(i) + ").",
-//        expected.get(i), actual.get(i));
-//    }
   }
 
   /**
@@ -413,53 +337,6 @@ public class GfshParserJUnitTest {
       if (completion.getValue().startsWith(ARGUMENT1_COMPLETIONS[0].getValue().substring(0, 3))) {
         completionValues.add(new Completion(" " + completion.getValue(), completion.getFormattedValue(), null, 0));
       }
-    }
-    assertAdvancedCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name and first argument
-    input = command1Names[0] + " " + ARGUMENT1_COMPLETIONS[0].getValue();
-    clearAndAdvancedComplete(completionCandidates, completionValues, input, parser);
-    // Here we expect the completions for argument2
-    for (Completion completion : ARGUMENT2_COMPLETIONS) {
-      completionValues.add(new Completion(SyntaxConstants.ARGUMENT_SEPARATOR + completion.getValue(), completion.getFormattedValue(), null, 0));
-    }
-    assertAdvancedCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name, first argument and the prefix of second
-    // argument
-    input = command1Names[0] + " " + ARGUMENT1_COMPLETIONS[0].getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + ARGUMENT2_COMPLETIONS[0]
-      .getValue()
-      .substring(0, 2);
-    clearAndAdvancedComplete(completionCandidates, completionValues, input, parser);
-    // Here we expect the completions for argument2
-    for (Completion completion : ARGUMENT2_COMPLETIONS) {
-      if (completion.getValue().startsWith(ARGUMENT2_COMPLETIONS[0].getValue().substring(0, 2))) {
-        completionValues.add(new Completion(SyntaxConstants.ARGUMENT_SEPARATOR + completion.getValue(), completion.getFormattedValue(), null, 0));
-      }
-    }
-    assertAdvancedCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name, first argument and second argument
-    input = COMMAND1_NAME + " " + ARGUMENT1_COMPLETIONS[0].getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + ARGUMENT2_COMPLETIONS[0]
-      .getValue();
-    clearAndAdvancedComplete(completionCandidates, completionValues, input, parser);
-    // Here we expect all the mandatory options
-    completionValues.add(new Completion(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION1_NAME, OPTION1_NAME, null, 0));
-    assertAdvancedCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name (synonym), first argument, second argument,
-    // prefix of first option
-    input = command1Names[1] + " " + ARGUMENT1_COMPLETIONS[0].getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + ARGUMENT2_COMPLETIONS[0]
-      .getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION1_NAME.substring(0, 3);
-    clearAndAdvancedComplete(completionCandidates, completionValues, input, parser);
-    // Here we expect the names for all the options
-    // whose prefix matches with the provided prefix
-    completionValues.add(new Completion(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION1_NAME, OPTION1_NAME, null, 0));
-    if (OPTION2_NAME.startsWith(OPTION1_NAME.substring(0, 3))) {
-      completionValues.add(new Completion(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION2_NAME, OPTION2_NAME, null, 0));
-    }
-    if (OPTION3_NAME.startsWith(OPTION1_NAME.substring(0, 3))) {
-      completionValues.add(new Completion(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION3_NAME, OPTION3_NAME, null, 0));
     }
     assertAdvancedCompletionValues(completionValues, completionCandidates);
 
@@ -537,23 +414,6 @@ public class GfshParserJUnitTest {
               .getValue() + SyntaxConstants.VALUE_SEPARATOR + OPTION1_COMPLETIONS[1].getValue() + SyntaxConstants.VALUE_SEPARATOR;
     clearAndAdvancedComplete(completionCandidates, completionValues, input, parser);
     // Here we expect nothing for completion
-    assertAdvancedCompletionValues(completionValues, completionCandidates);
-
-    // Input contains command name, first argument, second argument,
-    // first option and multiple values assigned to it. It also contains
-    // start of the second option
-    input = command1Names[0] + " " + ARGUMENT1_COMPLETIONS[0].getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + ARGUMENT2_COMPLETIONS[0]
-      .getValue() + SyntaxConstants.ARGUMENT_SEPARATOR + " " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION1_NAME + SyntaxConstants.OPTION_VALUE_SPECIFIER + OPTION1_COMPLETIONS[0]
-              .getValue() + SyntaxConstants.VALUE_SEPARATOR + OPTION1_COMPLETIONS[1].getValue() + " " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION2_NAME
-              .substring(0, 3);
-    clearAndAdvancedComplete(completionCandidates, completionValues, input, parser);
-    // Here we expect those options which have not been specified
-    // before and which have the prefix specified herein as their
-    // prefix
-    completionValues.add(new Completion(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION2_NAME, OPTION2_NAME, null, 0));
-    if (OPTION3_NAME.startsWith(OPTION2_NAME.substring(0, 3))) {
-      completionValues.add(new Completion(" " + SyntaxConstants.LONG_OPTION_SPECIFIER + OPTION3_NAME, OPTION3_NAME, null, 0));
-    }
     assertAdvancedCompletionValues(completionValues, completionCandidates);
   }
 
