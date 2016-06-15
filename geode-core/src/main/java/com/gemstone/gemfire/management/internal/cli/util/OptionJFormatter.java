@@ -19,62 +19,84 @@ package com.gemstone.gemfire.management.internal.cli.util;
 public class OptionJFormatter {
 
   private static final String J_OPTION = "--J=";
-  private static final String QUOTE = "\"";
-  private static final String SPACE = " ";
+  private static final char QUOTE = '\"';
+  private static final char SPACE = ' ';
 
+  private boolean quotesOpened;
+  private int previousSpace;
   private String command;
-  private int index;
-  private StringBuilder formatted = new StringBuilder();
-
-  private void everythingBeforeJ() {
-    int indexOfJ = this.command.indexOf(J_OPTION);
-    this.formatted.append(this.command.substring(0, indexOfJ));
-  }
-
-  private int nextJ(int start) {
-    int startOfJ = this.command.indexOf(J_OPTION, start);
-    int nextSpace = this.command.indexOf(SPACE, startOfJ);
-    if (start+1 != startOfJ){
-      this.formatted.append(command.substring(start, startOfJ));
-    }
-    this.formatted.append(J_OPTION);
-    this.formatted.append(QUOTE);
-    if (nextSpace == -1) {
-      this.formatted.append(this.command.substring(startOfJ + 4));
-    } else {
-      this.formatted.append(this.command.substring(startOfJ + 4, nextSpace));
-    }
-    this.formatted.append(QUOTE);
-    return nextSpace;
-  }
+  private StringBuilder formatted;
 
   public String formatCommand(String command){
     if (!containsJopt(command)) {
       return command;
     }
     this.command = command;
+    this.formatted = new StringBuilder();
+    quotesOpened = false;
 
-    int start = 0;
-   // everythingBeforeJ();
+    int nextJ = this.command.indexOf(J_OPTION);
 
-    while (start > -1) {
-      start = nextJ(start);
-
-      boolean noMoreJs = command.indexOf(J_OPTION, start) == -1;
-      boolean hasMoreOptions = start > -1;
-
-      if (noMoreJs){
-        formatted.append(command.substring(start));
-        break;
-      } else if (hasMoreOptions) {
-        this.formatted.append(SPACE);
+    while (nextJ > -1) {
+      String stringBeforeJ = this.command.substring(0, nextJ+4);
+      if (quotesOpened && stringBeforeJ.contains("--")){
+        previousSpace = stringBeforeJ.indexOf("--") - 1;
+        while (stringBeforeJ.charAt(previousSpace) == SPACE){
+          previousSpace--;
+        }
+        stringBeforeJ = stringBeforeJ.substring(0,previousSpace + 1) + QUOTE + stringBeforeJ.substring(previousSpace + 1);
+        quotesOpened = false;
       }
+
+      this.command = this.command.substring(nextJ+4);
+
+      this.formatted.append(stringBeforeJ);
+      if (!this.command.startsWith(""+QUOTE)){
+        this.formatted.append(QUOTE);
+        quotesOpened = true;
+      }
+      quotesOpened = true;
+
+      int nextSpace = this.command.indexOf(SPACE);
+      String stringAfterJ = null;
+      if (nextSpace > -1) {
+        stringAfterJ = this.command.substring(0, nextSpace);
+        this.command = this.command.substring(nextSpace);
+      } else {
+        stringAfterJ = this.command.substring(0);
+        this.command = "";
+      }
+
+      this.formatted.append(stringAfterJ);
+      if (stringAfterJ.endsWith("\"")){
+        quotesOpened = false;
+      }
+
+      nextSpace = this.command.indexOf(SPACE);
+
+      if (nextSpace == -1) {
+        if (!stringAfterJ.endsWith("" + QUOTE)) {
+          this.formatted.append(QUOTE);
+          quotesOpened = false;
+        }
+      } else if (!this.formatted.toString().endsWith(""+QUOTE)) {
+        if(this.command.startsWith(" --")){
+          this.formatted.append(QUOTE);
+          quotesOpened = false;
+        }
+      }
+
+      if (!containsJopt(this.command)){
+        this.formatted.append(this.command);
+      }
+
+      nextJ = this.command.indexOf(J_OPTION);
     }
 
     return formatted.toString();
   }
 
-  boolean containsJopt(String cmd){
+  public boolean containsJopt(String cmd){
     if (cmd.contains("--J")){
       return true;
     }

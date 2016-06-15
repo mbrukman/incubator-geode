@@ -18,6 +18,7 @@ package com.gemstone.gemfire.management.internal.cli;
 
 import static org.assertj.core.api.Assertions.*;
 
+import java.util.Arrays;
 import java.util.Map;
 
 import org.junit.After;
@@ -38,10 +39,7 @@ public class GfshParserIntegrationTest {
   public void setUp() throws Exception {
     CommandManager.clearInstance();
     this.commandManager = CommandManager.getInstance(true);
-
     this.parser = new GfshParser(commandManager);
-
-    //CliUtil.isGfshVM = false;
   }
 
   @After
@@ -49,34 +47,73 @@ public class GfshParserIntegrationTest {
     CommandManager.clearInstance();
   }
 
-  @Test
-  public void testCommandWithoutOptions() throws Exception {
-    String input = "start locator --name=loc1 --J=\"-Dgemfire.http-service-port=8080\"";
-    //String input = "start locator --name=loc1";
+  private Map<String, String> params(String input, String commandName, String commandMethod) {
     ParseResult parseResult = parser.parse(input);
-    assertThat(parseResult).isNotNull().isExactlyInstanceOf(GfshParseResult.class);
-
     GfshParseResult gfshParseResult = (GfshParseResult) parseResult;
-
-    assertThat(gfshParseResult.getMethod().getName()).isEqualTo("startLocator");
-    assertThat(gfshParseResult.getUserInput()).isEqualTo(input);
-
-    assertThat(gfshParseResult.getArguments()).isNotNull();
-    boolean foundName = false;
-    for (Object arg : gfshParseResult.getArguments()) {
-      if ("loc1".equals(arg)) {
-        foundName = true;
-      }
-    }
-    assertThat(foundName).isTrue();
-
-    assertThat(gfshParseResult.getCommandName()).isEqualTo("start locator");
-
     Map<String, String> params = gfshParseResult.getParamValueStrings();
-    assertThat(params).isNotNull().isNotEmpty();
-
     for (String param : params.keySet()) {
       System.out.println(param + "=" + params.get(param));
     }
+
+    assertThat(gfshParseResult.getMethod().getName()).isEqualTo(commandMethod);
+    assertThat(gfshParseResult.getUserInput()).isEqualTo(input.trim());
+    assertThat(gfshParseResult.getCommandName()).isEqualTo(commandName);
+
+    return params;
   }
+
+  @Test
+  public void oneJOptionWithQuotes() throws Exception {
+    String input = "start locator  --J=\"-Dgemfire.http-service-port=8080\" --name=loc1";
+    Map<String, String> params = params(input, "start locator", "startLocator");
+
+    assertThat(params.get("name")).isEqualTo("loc1");
+    assertThat(params.get("J")).isEqualTo("\"-Dgemfire.http-service-port=8080\"");
+  }
+
+  @Test
+  public void oneJOptionWithSpaceInQuotes() throws Exception {
+    String input = "start locator  --J=\"-Dgemfire.http-service-port= 8080\" --name=loc1";
+    Map<String, String> params = params(input, "start locator", "startLocator");
+
+    assertThat(params.get("name")).isEqualTo("loc1");
+    assertThat(params.get("J")).isEqualTo("\"-Dgemfire.http-service-port= 8080\"");
+  }
+
+  @Test
+  public void oneJOption() throws Exception {
+    String input = "start locator --J=-Dgemfire.http-service-port=8080 --name=loc1";
+    Map<String, String> params = params(input, "start locator", "startLocator");
+
+    assertThat(params.get("name")).isEqualTo("loc1");
+    assertThat(params.get("J")).isEqualTo("\"-Dgemfire.http-service-port=8080\"");
+  }
+
+  @Test
+  public void twoJOptions() throws Exception {
+    String input = "start locator --J=-Dgemfire.http-service-port=8080 --name=loc1 --J=-Ddummythinghere";
+    Map<String, String> params = params(input, "start locator", "startLocator");
+
+    assertThat(params.get("name")).isEqualTo("loc1");
+    assertThat(params.get("J")).isEqualTo("\"-Dgemfire.http-service-port=8080\",\"-Ddummythinghere\"");
+  }
+
+  @Test
+  public void twoJOptionsOneWithQuotesOneWithout() throws Exception {
+    String input = "start locator --J=\"-Dgemfire.http-service-port=8080\" --name=loc1 --J=-Ddummythinghere";
+    Map<String, String> params = params(input, "start locator", "startLocator");
+
+    assertThat(params.get("name")).isEqualTo("loc1");
+    assertThat(params.get("J")).isEqualTo("\"-Dgemfire.http-service-port=8080\",\"-Ddummythinghere\"");
+  }
+
+  @Test
+  public void oneJOptionWithQuotesAndLotsOfSpaces() throws Exception {
+    String input = "start locator       --J=\"-Dgemfire.http-service-port=8080\"      --name=loc1         ";
+    Map<String, String> params = params(input, "start locator", "startLocator");
+
+    assertThat(params.get("name")).isEqualTo("loc1");
+    assertThat(params.get("J")).isEqualTo("\"-Dgemfire.http-service-port=8080\"");
+  }
+
 }

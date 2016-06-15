@@ -39,6 +39,7 @@ import com.gemstone.gemfire.management.internal.cli.parser.SyntaxConstants;
 import com.gemstone.gemfire.management.internal.cli.parser.preprocessor.Preprocessor;
 import com.gemstone.gemfire.management.internal.cli.parser.preprocessor.PreprocessorUtils;
 import com.gemstone.gemfire.management.internal.cli.parser.preprocessor.TrimmedInput;
+import com.gemstone.gemfire.management.internal.cli.util.OptionJFormatter;
 
 /**
  * Implementation of {@link GfshOptionParser} which internally makes use of
@@ -114,7 +115,7 @@ public class JoptOptionParser implements GfshOptionParser {
     optionSet.setUserInput(userInput!=null?userInput.trim():"");
     if (userInput != null) {
       TrimmedInput input = PreprocessorUtils.trim(userInput);
-      String[] preProcessedInput = preProcess(input.getString());
+      String[] preProcessedInput = preProcess(new OptionJFormatter().formatCommand(input.getString()));
       joptsimple.OptionSet joptOptionSet = null;
       CliCommandOptionException ce = null;
       // int factor = 0;

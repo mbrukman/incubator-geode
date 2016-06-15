@@ -19,7 +19,7 @@ package com.gemstone.gemfire.management.internal.cli.util;
 import static org.assertj.core.api.Assertions.*;
 import static org.junit.Assert.*;
 
-import org.junit.Ignore;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -28,87 +28,162 @@ import com.gemstone.gemfire.test.junit.categories.UnitTest;
 @Category(UnitTest.class)
 public class OptionJFormatterTest {
 
-  private static final String quote = "\"";
+  private OptionJFormatter formatter;
+  
+  @Before
+  public void setUp() {
+    this.formatter = new OptionJFormatter();
+  }
 
   @Test
   public void containsJoptShouldReturnTrueIfCmdHasJ() {
     String cmd = "start locator --name=loc1 --J=-Dfoo=bar";
-    OptionJFormatter ojf = new OptionJFormatter();
-    assertTrue(ojf.containsJopt(cmd));
+    assertTrue(this.formatter.containsJopt(cmd));
   }
 
   @Test
   public void containsJoptShouldReturnFalseIfCmdDoesntHaveJ() {
     String cmd = "start locator --name=loc1 ";
-    OptionJFormatter ojf = new OptionJFormatter();
-    assertFalse(ojf.containsJopt(cmd));
+    assertFalse(this.formatter.containsJopt(cmd));
   }
 
   @Test
   public void containsJoptShouldReturnTrueIfCmdHasMultipleJ() {
     String cmd = "start locator --name=loc1 --J=-Dfoo=bar --J=-Dbar=foo";
-    OptionJFormatter ojf = new OptionJFormatter();
-    assertTrue(ojf.containsJopt(cmd));
+    assertTrue(this.formatter.containsJopt(cmd));
   }
 
   @Test
   public void valueWithoutQuotesReturnsWithQuotes() {
     String cmd = "start locator --name=loc1 --J=-Dfoo=bar";
-    OptionJFormatter ojf = new OptionJFormatter();
-    String formattedCmd = ojf.formatCommand(cmd);
+    String formattedCmd = this.formatter.formatCommand(cmd);
 
-    String expected = "start locator --name=loc1 --J=" + quote + "-Dfoo=bar" + quote;
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=bar\"";
     assertThat(formattedCmd).isEqualTo(expected);
   }
 
   @Test
   public void valueWithoutQuotesReturnsWithQuotes_2() {
     String cmd = "start locator --J=-Dfoo=bar --name=loc1";
-    OptionJFormatter ojf = new OptionJFormatter();
-    String formattedCmd = ojf.formatCommand(cmd);
+    String formattedCmd = this.formatter.formatCommand(cmd);
 
-    String expected = "start locator --J=" + quote + "-Dfoo=bar" + quote + " --name=loc1";
+    String expected = "start locator --J=\"-Dfoo=bar\" --name=loc1";
     assertThat(formattedCmd).isEqualTo(expected);
   }
 
   @Test
   public void nullShouldThrowNullPointerException() {
-    assertThatThrownBy(() -> new OptionJFormatter().formatCommand(null)).isExactlyInstanceOf(NullPointerException.class);
+    assertThatThrownBy(() -> this.formatter.formatCommand(null)).isExactlyInstanceOf(NullPointerException.class);
   }
 
   @Test
   public void emptyShouldThrowNullPointerException() {
-    assertThat(new OptionJFormatter().formatCommand("")).isEqualTo("");
+    assertThat(this.formatter.formatCommand("")).isEqualTo("");
   }
 
   @Test
-  public void multipleJOptionsShould_something() {
+  public void multipleJOptions() {
     String cmd = "start locator --name=loc1 --J=-Dfoo=bar --J=-Dbar=foo";
-    OptionJFormatter ojf = new OptionJFormatter();
-    String formattedCmd = ojf.formatCommand(cmd);
+    String formattedCmd = this.formatter.formatCommand(cmd);
 
-    String expected = "start locator --name=loc1 --J=" + quote + "-Dfoo=bar" + quote + " --J=" + quote + "-Dbar=foo" + quote;
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=bar\" --J=\"-Dbar=foo\"";
     assertThat(formattedCmd).isEqualTo(expected);
   }
 
   @Test
-  public void multipleJOptionsWithSomethingAfterShould_something() {
+  public void multipleJOptionsWithSomethingAfter() {
     String cmd = "start locator --name=loc1 --J=-Dfoo=bar --J=-Dbar=foo --group=locators";
-    OptionJFormatter ojf = new OptionJFormatter();
-    String formattedCmd = ojf.formatCommand(cmd);
+    String formattedCmd = this.formatter.formatCommand(cmd);
 
-    String expected = "start locator --name=loc1 --J=" + quote + "-Dfoo=bar" + quote + " --J=" + quote + "-Dbar=foo" + quote + " --group=locators";
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=bar\" --J=\"-Dbar=foo\" --group=locators";
     assertThat(formattedCmd).isEqualTo(expected);
   }
 
   @Test
-  public void multipleJOptionsWithSomethingBetweenShould_something() {
+  public void multipleJOptionsWithSomethingBetween() {
     String cmd = "start locator --name=loc1 --J=-Dfoo=bar --group=locators --J=-Dbar=foo";
-    OptionJFormatter ojf = new OptionJFormatter();
-    String formattedCmd = ojf.formatCommand(cmd);
+    String formattedCmd = this.formatter.formatCommand(cmd);
 
-    String expected = "start locator --name=loc1 --J=" + quote + "-Dfoo=bar" + quote + " --group=locators --J=" + quote + "-Dbar=foo" + quote;
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=bar\" --group=locators --J=\"-Dbar=foo\"";
     assertThat(formattedCmd).isEqualTo(expected);
+  }
+
+  @Test
+  public void valueWithQuotes() {
+    String cmd = "start locator --name=loc1 --J=\"-Dfoo=bar\"";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    assertThat(formattedCmd).isEqualTo(cmd);
+  }
+
+  @Test
+  public void valueWithMissingEndQuote() {
+    String cmd = "start locator --J=\"-Dfoo=bar --name=loc1";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    String expected = "start locator --J=\"-Dfoo=bar\" --name=loc1";
+    assertThat(formattedCmd).isEqualTo(expected);
+  }
+
+  @Test
+  public void valueWithMissingStartQuote() {
+    String cmd = "start locator --name=loc1 --J=-Dfoo=bar\"";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=bar\"";
+    assertThat(formattedCmd).isEqualTo(expected);
+  }
+
+  @Test
+  public void oneValueWithQuotesOneWithout() {
+    String cmd = "start locator --name=loc1 --J=\"-Dfoo=bar\" --J=-Dfoo=bar";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=bar\" --J=\"-Dfoo=bar\"";
+    assertThat(formattedCmd).as(cmd).isEqualTo(expected);
+  }
+
+  @Test
+  public void oneValueWithoutQuotesOneWith() {
+    String cmd = "start locator --name=loc1 --J=-Dfoo=bar --J=\"-Dfoo=bar\"";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=bar\" --J=\"-Dfoo=bar\"";
+    assertThat(formattedCmd).isEqualTo(expected);
+  }
+
+  @Test
+  public void twoValuesWithQuotes() {
+    String cmd = "start locator --name=loc1 --J=\"-Dfoo=bar\" --J=\"-Dfoo=bar\"";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    assertThat(formattedCmd).as(cmd).isEqualTo(cmd);
+  }
+
+  @Test
+  public void valueContainingQuotes() {
+    String cmd = "start locator --name=loc1 --J=\"-Dfoo=region\"";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=region\"";
+    assertThat(formattedCmd).as(cmd).isEqualTo(expected);
+  }
+
+  @Test
+  public void valueContainingQuotesAndSpace() {
+    String cmd = "start locator --name=loc1 --J=\"-Dfoo=my phrase\"";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=my phrase\"";
+    assertThat(formattedCmd).as(cmd).isEqualTo(expected);
+  }
+
+  @Test
+  public void valueContainingQuotesAndMultipleSpaces() {
+    String cmd = "start locator --name=loc1 --J=\"-Dfoo=this is a phrase\"";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=this is a phrase\"";
+    assertThat(formattedCmd).as(cmd).isEqualTo(expected);
+  }
+
+  @Test
+  public void valueContainingMultipleJWithSpaces() {
+    String cmd = "start locator --name=loc1 --J=-Dfoo=this is a phrase             --J=\"-Dfoo=a short sentence\"";
+    String formattedCmd = this.formatter.formatCommand(cmd);
+    String expected = "start locator --name=loc1 --J=\"-Dfoo=this is a phrase\"             --J=\"-Dfoo=a short sentence\"";
+    assertThat(formattedCmd).as(cmd).isEqualTo(expected);
   }
 
 }

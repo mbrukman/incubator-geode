@@ -893,6 +893,7 @@ public class GfshParser implements Parser {
           preConfigureConverters(commandTarget);
 
           try {
+            // TODO: next call invokes OptionJFormatter
             parse = commandTarget.getOptionParser().parse(gfshMethodTarget.getRemainingBuffer());
           } catch (CliException ce) {
             if (ce instanceof CliCommandOptionException) {
@@ -911,6 +912,7 @@ public class GfshParser implements Parser {
           }
 
           error = processArguments(parse, commandTarget, paramValMap, parameters, error);
+          // TODO: next call throws when space before closing "
           error = processOptions(parse, commandTarget, paramValMap, parameters, error);
 
           if (!error) {
