@@ -77,7 +77,7 @@ public class DistributionConfigJUnitTest {
   @Test
   public void testGetAttributeNames() {
     String[] attNames = AbstractDistributionConfig._getAttNames();
-    assertEquals(attNames.length, 141);
+    assertEquals(attNames.length, 142);
 
     List boolList = new ArrayList();
     List intList = new ArrayList();
@@ -112,7 +112,7 @@ public class DistributionConfigJUnitTest {
     //TODO - This makes no sense. One has no idea what the correct expected number of attributes are.
     assertEquals(27, boolList.size());
     assertEquals(33, intList.size());
-    assertEquals(73, stringList.size());
+    assertEquals(74, stringList.size());
     assertEquals(5, fileList.size());
     assertEquals(3, otherList.size());
   }

@@ -22,6 +22,8 @@ import static com.gemstone.gemfire.distributed.ConfigurationProperties.*;
 import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
@@ -36,6 +38,7 @@ import java.util.Set;
 
 import com.gemstone.gemfire.GemFireConfigException;
 import com.gemstone.gemfire.GemFireIOException;
+import com.gemstone.gemfire.InternalGemFireException;
 import com.gemstone.gemfire.distributed.DistributedSystem;
 import com.gemstone.gemfire.internal.ConfigSource;
 import com.gemstone.gemfire.internal.SocketCreator;
@@ -819,12 +822,45 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
       Map.Entry entry = (Map.Entry) iter.next();
       System.setProperty(SECURITY_SYSTEM_PREFIX + (String) entry.getKey(), (String) entry.getValue());
     }
-    computeMcastPortDefault();
     if (!isConnected) {
       copySSLPropsToServerSSLProps();
       copySSLPropsToJMXSSLProps();
       copyClusterSSLPropsToGatewaySSLProps();
       copySSLPropsToHTTPSSLProps();
+    }
+
+    // Make attributes read only
+    this.modifiable = true;
+    validateConfigurationProperties(props);
+    // Make attributes read only
+    this.modifiable = false;
+
+  }
+
+  /**
+   * Here we will validate the correctness of the set properties as per the CheckAttributeChecker annotations defined in #AbstractDistributionConfig
+   * @param props
+   */
+  private void validateConfigurationProperties(final HashMap props) {
+    for (Object o : props.keySet()) {
+      String propertyName = (String) o;
+      Object value = null;
+      try {
+        Method method = getters.get(propertyName);
+        if (method != null) {
+          value = method.invoke(this, new Object[] {});
+        }
+      } catch (Exception e) {
+        if (e instanceof RuntimeException) {
+          throw (RuntimeException) e;
+        }
+        if (e.getCause() instanceof RuntimeException) {
+          throw (RuntimeException) e.getCause();
+        } else {
+          throw new InternalGemFireException("error invoking getter for property" + propertyName );
+        }
+      }
+      checkAttribute(propertyName,value);
     }
   }
 
@@ -836,8 +872,9 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   private void copySSLPropsToJMXSSLProps() {
     boolean jmxSSLEnabledOverriden = this.sourceMap.get(JMX_MANAGER_SSL_ENABLED) != null;
     boolean clusterSSLOverRidden = this.sourceMap.get(CLUSTER_SSL_ENABLED) != null;
+    boolean hasSSLComponents = this.sourceMap.get(SSL_ENABLED_COMPONENTS) != null;
 
-    if (clusterSSLOverRidden && !jmxSSLEnabledOverriden) {
+    if (clusterSSLOverRidden && !jmxSSLEnabledOverriden && !hasSSLComponents) {
       this.jmxManagerSSLEnabled = this.clusterSSLEnabled;
       this.sourceMap.put(JMX_MANAGER_SSL_ENABLED, this.sourceMap.get(CLUSTER_SSL_ENABLED));
       if (this.sourceMap.get(CLUSTER_SSL_CIPHERS) != null) {
@@ -908,10 +945,10 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
    */
   private void copySSLPropsToHTTPSSLProps() {
     boolean httpServiceSSLEnabledOverriden = this.sourceMap.get(HTTP_SERVICE_SSL_ENABLED) != null;
-
     boolean clusterSSLOverRidden = this.sourceMap.get(CLUSTER_SSL_ENABLED) != null;
+    boolean hasSSLComponents = this.sourceMap.get(SSL_ENABLED_COMPONENTS) != null;
 
-    if (clusterSSLOverRidden && !httpServiceSSLEnabledOverriden) {
+    if (clusterSSLOverRidden && !httpServiceSSLEnabledOverriden && !hasSSLComponents) {
       this.httpServiceSSLEnabled = this.clusterSSLEnabled;
       this.sourceMap.put(HTTP_SERVICE_SSL_ENABLED, this.sourceMap.get(CLUSTER_SSL_ENABLED));
 
@@ -985,8 +1022,9 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   private void copySSLPropsToServerSSLProps() {
     boolean cacheServerSSLOverriden = this.sourceMap.get(SERVER_SSL_ENABLED) != null;
     boolean clusterSSLOverRidden = this.sourceMap.get(CLUSTER_SSL_ENABLED) != null;
+    boolean hasSSLComponents = this.sourceMap.get(SSL_ENABLED_COMPONENTS) != null;
 
-    if (clusterSSLOverRidden && !cacheServerSSLOverriden) {
+    if (clusterSSLOverRidden && !cacheServerSSLOverriden && !hasSSLComponents) {
       this.serverSSLEnabled = this.clusterSSLEnabled;
       this.sourceMap.put(SERVER_SSL_ENABLED, this.sourceMap.get(CLUSTER_SSL_ENABLED));
       if (this.sourceMap.get(CLUSTER_SSL_CIPHERS) != null) {
@@ -1058,8 +1096,9 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   private void copyClusterSSLPropsToGatewaySSLProps() {
     boolean gatewaySSLOverriden = this.sourceMap.get(GATEWAY_SSL_ENABLED) != null;
     boolean clusterSSLOverRidden = this.sourceMap.get(CLUSTER_SSL_ENABLED) != null;
+    boolean hasSSLComponents = this.sourceMap.get(SSL_ENABLED_COMPONENTS) != null;
 
-    if (clusterSSLOverRidden && !gatewaySSLOverriden) {
+    if (clusterSSLOverRidden && !gatewaySSLOverriden && !hasSSLComponents) {
       this.gatewaySSLEnabled = this.clusterSSLEnabled;
       this.sourceMap.put(GATEWAY_SSL_ENABLED, this.sourceMap.get(CLUSTER_SSL_ENABLED));
       if (this.sourceMap.get(CLUSTER_SSL_CIPHERS) != null) {
@@ -1125,19 +1164,6 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
 
-  private void computeMcastPortDefault() {
-    // a no-op since multicast discovery has been removed
-    // and the default mcast port is now zero
-
-    //    ConfigSource cs = getAttSourceMap().get(ConfigurationProperties.MCAST_PORT);
-    //    if (cs == null) {
-    //      String locators = getLocators();
-    //      if (locators != null && !locators.isEmpty()) {
-    //        this.mcastPort = 0; // fixes 46308
-    //      }
-    //    }
-  }
-
   /**
    * Produce a DistributionConfigImpl for the given properties and return it.
    */
@@ -1181,7 +1207,6 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
           this.setAttribute(propName, propVal.trim(), this.sourceMap.get(propName));
         }
       }
-      computeMcastPortDefault();
       // Make attributes read only
       this.modifiable = false;
     }
@@ -1500,7 +1525,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setHttpServicePort(int value) {
-    this.httpServicePort = (Integer) checkAttribute(HTTP_SERVICE_PORT, value);
+    this.httpServicePort = value;
   }
 
   public String getHttpServiceBindAddress() {
@@ -1508,7 +1533,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setHttpServiceBindAddress(String value) {
-    this.httpServiceBindAddress = (String) checkAttribute(HTTP_SERVICE_BIND_ADDRESS, value);
+    this.httpServiceBindAddress = value;
   }
 
   public boolean getStartDevRestApi() {
@@ -1520,7 +1545,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setUserCommandPackages(String value) {
-    this.userCommandPackages = (String) checkAttribute(USER_COMMAND_PACKAGES, value);
+    this.userCommandPackages = value;
   }
 
   public boolean getDeltaPropagation() {
@@ -1528,42 +1553,42 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setDeltaPropagation(boolean value) {
-    this.deltaPropagation = (Boolean) checkAttribute(DELTA_PROPAGATION, value);
+    this.deltaPropagation = (Boolean) value;
   }
 
   public void setName(String value) {
     if (value == null) {
       value = DEFAULT_NAME;
     }
-    this.name = (String) checkAttribute(NAME, value);
+    this.name = (String) value;
   }
 
   public void setTcpPort(int value) {
-    this.tcpPort = (Integer) checkAttribute(TCP_PORT, value);
+    this.tcpPort = (Integer) value;
   }
 
   public void setMcastPort(int value) {
-    this.mcastPort = (Integer) checkAttribute(MCAST_PORT, value);
+    this.mcastPort = (Integer) value;
   }
 
   public void setMcastTtl(int value) {
-    this.mcastTtl = (Integer) checkAttribute(MCAST_TTL, value);
+    this.mcastTtl = (Integer) value;
   }
 
   public void setSocketLeaseTime(int value) {
-    this.socketLeaseTime = (Integer) checkAttribute(SOCKET_LEASE_TIME, value);
+    this.socketLeaseTime = (Integer) value;
   }
 
   public void setSocketBufferSize(int value) {
-    this.socketBufferSize = (Integer) checkAttribute(SOCKET_BUFFER_SIZE, value);
+    this.socketBufferSize = (Integer) value;
   }
 
   public void setConserveSockets(boolean value) {
-    this.conserveSockets = (Boolean) checkAttribute(CONSERVE_SOCKETS, value);
+    this.conserveSockets = (Boolean) value;
   }
 
   public void setRoles(String value) {
-    this.roles = (String) checkAttribute(ROLES, value);
+    this.roles = (String) value;
   }
 
   public void setMaxWaitTimeForReconnect(int value) {
@@ -1575,22 +1600,22 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setMcastAddress(InetAddress value) {
-    this.mcastAddress = (InetAddress) checkAttribute(MCAST_ADDRESS, value);
+    this.mcastAddress = (InetAddress) value;
   }
 
   public void setBindAddress(String value) {
-    this.bindAddress = (String) checkAttribute(BIND_ADDRESS, value);
+    this.bindAddress = (String) value;
   }
 
   public void setServerBindAddress(String value) {
-    this.serverBindAddress = (String) checkAttribute(SERVER_BIND_ADDRESS, value);
+    this.serverBindAddress = (String) value;
   }
 
   public void setLocators(String value) {
     if (value == null) {
       value = DEFAULT_LOCATORS;
     }
-    this.locators = (String) checkAttribute(LOCATORS, value);
+    this.locators = (String) value;
   }
 
   public void setLocatorWaitTime(int value) {
@@ -1602,15 +1627,15 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setDeployWorkingDir(File value) {
-    this.deployWorkingDir = (File) checkAttribute(DEPLOY_WORKING_DIR, value);
+    this.deployWorkingDir = (File) value;
   }
 
   public void setLogFile(File value) {
-    this.logFile = (File) checkAttribute(LOG_FILE, value);
+    this.logFile = (File) value;
   }
 
   public void setLogLevel(int value) {
-    this.logLevel = (Integer) checkAttribute(LOG_LEVEL, value);
+    this.logLevel = (Integer) value;
   }
 
   /**
@@ -1648,18 +1673,18 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
           throw new GemFireConfigException("Illegal port specified for start-locator", e);
         }
       } else {
-        value = (String) checkAttribute(START_LOCATOR, value);
+        
       }
     }
     this.startLocator = value;
   }
 
   public void setStatisticSamplingEnabled(boolean value) {
-    this.statisticSamplingEnabled = (Boolean) checkAttribute(STATISTIC_SAMPLING_ENABLED, value);
+    this.statisticSamplingEnabled = (Boolean) value;
   }
 
   public void setStatisticSampleRate(int value) {
-    value = (Integer) checkAttribute(STATISTIC_SAMPLE_RATE, value);
+    value = (Integer) value;
     if (value < DEFAULT_STATISTIC_SAMPLE_RATE) {
       // fix 48228
       InternalDistributedSystem ids = InternalDistributedSystem.getConnectedInstance();
@@ -1676,19 +1701,19 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
     if (value == null) {
       value = new File("");
     }
-    this.statisticArchiveFile = (File) checkAttribute(STATISTIC_ARCHIVE_FILE, value);
+    this.statisticArchiveFile = (File) value;
   }
 
   public void setCacheXmlFile(File value) {
-    this.cacheXmlFile = (File) checkAttribute(CACHE_XML_FILE, value);
+    this.cacheXmlFile = (File) value;
   }
 
   public void setAckWaitThreshold(int value) {
-    this.ackWaitThreshold = (Integer) checkAttribute(ACK_WAIT_THRESHOLD, value);
+    this.ackWaitThreshold = (Integer) value;
   }
 
   public void setAckSevereAlertThreshold(int value) {
-    this.ackForceDisconnectThreshold = (Integer) checkAttribute(ACK_SEVERE_ALERT_THRESHOLD, value);
+    this.ackForceDisconnectThreshold = (Integer) value;
   }
 
   public int getArchiveDiskSpaceLimit() {
@@ -1696,7 +1721,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setArchiveDiskSpaceLimit(int value) {
-    this.archiveDiskSpaceLimit = (Integer) checkAttribute(ARCHIVE_DISK_SPACE_LIMIT, value);
+    this.archiveDiskSpaceLimit = (Integer) value;
   }
 
   public int getArchiveFileSizeLimit() {
@@ -1704,7 +1729,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setArchiveFileSizeLimit(int value) {
-    this.archiveFileSizeLimit = (Integer) checkAttribute(ARCHIVE_FILE_SIZE_LIMIT, value);
+    this.archiveFileSizeLimit = (Integer) value;
   }
 
   public int getLogDiskSpaceLimit() {
@@ -1712,7 +1737,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setLogDiskSpaceLimit(int value) {
-    this.logDiskSpaceLimit = (Integer) checkAttribute(LOG_DISK_SPACE_LIMIT, value);
+    this.logDiskSpaceLimit = (Integer) value;
   }
 
   public int getLogFileSizeLimit() {
@@ -1720,51 +1745,51 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setLogFileSizeLimit(int value) {
-    this.logFileSizeLimit = (Integer) checkAttribute(LOG_FILE_SIZE_LIMIT, value);
+    this.logFileSizeLimit = (Integer) value;
   }
 
   public void setClusterSSLEnabled(boolean value) {
-    this.clusterSSLEnabled = (Boolean) checkAttribute(CLUSTER_SSL_ENABLED, value);
+    this.clusterSSLEnabled = (Boolean) value;
   }
 
   public void setClusterSSLProtocols(String value) {
-    this.clusterSSLProtocols = (String) checkAttribute(CLUSTER_SSL_PROTOCOLS, value);
+    this.clusterSSLProtocols = (String) value;
   }
 
   public void setClusterSSLCiphers(String value) {
-    this.clusterSSLCiphers = (String) checkAttribute(CLUSTER_SSL_CIPHERS, value);
+    this.clusterSSLCiphers = (String) value;
   }
 
   public void setClusterSSLRequireAuthentication(boolean value) {
-    this.clusterSSLRequireAuthentication = (Boolean) checkAttribute(CLUSTER_SSL_REQUIRE_AUTHENTICATION, value);
+    this.clusterSSLRequireAuthentication = (Boolean) value;
   }
 
   public void setClusterSSLKeyStore(String value) {
-    value = (String) checkAttribute(CLUSTER_SSL_KEYSTORE, value);
+    
     this.getClusterSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_NAME, value);
     this.clusterSSLKeyStore = value;
   }
 
   public void setClusterSSLKeyStoreType(String value) {
-    value = (String) checkAttribute(CLUSTER_SSL_KEYSTORE_TYPE, value);
+    
     this.getClusterSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_TYPE_NAME, value);
     this.clusterSSLKeyStoreType = value;
   }
 
   public void setClusterSSLKeyStorePassword(String value) {
-    value = (String) checkAttribute(CLUSTER_SSL_KEYSTORE_PASSWORD, value);
+    
     this.getClusterSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_PASSWORD_NAME, value);
     this.clusterSSLKeyStorePassword = value;
   }
 
   public void setClusterSSLTrustStore(String value) {
-    value = (String) checkAttribute(CLUSTER_SSL_TRUSTSTORE, value);
+    
     this.getClusterSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_NAME, value);
     this.clusterSSLTrustStore = value;
   }
 
   public void setClusterSSLTrustStorePassword(String value) {
-    value = (String) checkAttribute(CLUSTER_SSL_TRUSTSTORE_PASSWORD, value);
+    
     this.getClusterSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_PASSWORD_NAME, value);
     this.clusterSSLTrustStorePassword = value;
   }
@@ -1774,7 +1799,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setMcastSendBufferSize(int value) {
-    mcastSendBufferSize = (Integer) checkAttribute(MCAST_SEND_BUFFER_SIZE, value);
+    mcastSendBufferSize = (Integer) value;
   }
 
   public int getMcastRecvBufferSize() {
@@ -1782,19 +1807,19 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setMcastRecvBufferSize(int value) {
-    mcastRecvBufferSize = (Integer) checkAttribute(MCAST_RECV_BUFFER_SIZE, value);
+    mcastRecvBufferSize = (Integer) value;
   }
 
   public void setAsyncDistributionTimeout(int value) {
-    this.asyncDistributionTimeout = (Integer) checkAttribute(ASYNC_DISTRIBUTION_TIMEOUT, value);
+    this.asyncDistributionTimeout = (Integer) value;
   }
 
   public void setAsyncQueueTimeout(int value) {
-    this.asyncQueueTimeout = (Integer) checkAttribute(ASYNC_QUEUE_TIMEOUT, value);
+    this.asyncQueueTimeout = (Integer) value;
   }
 
   public void setAsyncMaxQueueSize(int value) {
-    this.asyncMaxQueueSize = (Integer) checkAttribute(ASYNC_MAX_QUEUE_SIZE, value);
+    this.asyncMaxQueueSize = (Integer) value;
   }
 
   public FlowControlParams getMcastFlowControl() {
@@ -1802,7 +1827,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setMcastFlowControl(FlowControlParams values) {
-    mcastFlowControl = (FlowControlParams) checkAttribute(MCAST_FLOW_CONTROL, values);
+    mcastFlowControl = (FlowControlParams) values;
   }
 
   public int getUdpFragmentSize() {
@@ -1810,7 +1835,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setUdpFragmentSize(int value) {
-    udpFragmentSize = (Integer) checkAttribute(UDP_FRAGMENT_SIZE, value);
+    udpFragmentSize = (Integer) value;
   }
 
   public int getUdpSendBufferSize() {
@@ -1818,7 +1843,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setUdpSendBufferSize(int value) {
-    udpSendBufferSize = (Integer) checkAttribute(UDP_SEND_BUFFER_SIZE, value);
+    udpSendBufferSize = (Integer) value;
   }
 
   public int getUdpRecvBufferSize() {
@@ -1826,7 +1851,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setUdpRecvBufferSize(int value) {
-    udpRecvBufferSize = (Integer) checkAttribute(UDP_RECV_BUFFER_SIZE, value);
+    udpRecvBufferSize = (Integer) value;
   }
 
   public boolean getDisableTcp() {
@@ -1850,7 +1875,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setMemberTimeout(int value) {
-    memberTimeout = (Integer) checkAttribute(MEMBER_TIMEOUT, value);
+    memberTimeout = (Integer) value;
   }
 
   /**
@@ -1864,7 +1889,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
    * @since GemFire 5.7
    */
   public void setClientConflation(String value) {
-    this.clientConflation = (String) checkAttribute(CONFLATE_EVENTS, value);
+    this.clientConflation = (String) value;
   }
 
   public String getDurableClientId() {
@@ -1872,7 +1897,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setDurableClientId(String value) {
-    durableClientId = (String) checkAttribute(DURABLE_CLIENT_ID, value);
+    durableClientId = (String) value;
   }
 
   public int getDurableClientTimeout() {
@@ -1880,7 +1905,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setDurableClientTimeout(int value) {
-    durableClientTimeout = (Integer) checkAttribute(DURABLE_CLIENT_TIMEOUT, value);
+    durableClientTimeout = (Integer) value;
   }
 
   public String getSecurityClientAuthInit() {
@@ -1888,7 +1913,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityClientAuthInit(String value) {
-    securityClientAuthInit = (String) checkAttribute(SECURITY_CLIENT_AUTH_INIT, value);
+    securityClientAuthInit = (String) value;
   }
 
   public String getSecurityClientAuthenticator() {
@@ -1912,7 +1937,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityClientAuthenticator(String value) {
-    securityClientAuthenticator = (String) checkAttribute(SECURITY_CLIENT_AUTHENTICATOR, value);
+    securityClientAuthenticator = (String) value;
   }
 
   public String getSecurityClientDHAlgo() {
@@ -1920,7 +1945,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityClientDHAlgo(String value) {
-    securityClientDHAlgo = (String) checkAttribute(SECURITY_CLIENT_DHALGO, value);
+    securityClientDHAlgo = (String) value;
   }
 
   public String getSecurityPeerAuthInit() {
@@ -1928,7 +1953,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityPeerAuthInit(String value) {
-    securityPeerAuthInit = (String) checkAttribute(SECURITY_PEER_AUTH_INIT, value);
+    securityPeerAuthInit = (String) value;
   }
 
   public String getSecurityPeerAuthenticator() {
@@ -1936,7 +1961,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityPeerAuthenticator(String value) {
-    securityPeerAuthenticator = (String) checkAttribute(SECURITY_PEER_AUTHENTICATOR, value);
+    securityPeerAuthenticator = (String) value;
   }
 
   public String getSecurityClientAccessor() {
@@ -1944,7 +1969,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityClientAccessor(String value) {
-    securityClientAccessor = (String) checkAttribute(SECURITY_CLIENT_ACCESSOR, value);
+    securityClientAccessor = (String) value;
   }
 
   public String getSecurityClientAccessorPP() {
@@ -1952,7 +1977,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityClientAccessorPP(String value) {
-    securityClientAccessorPP = (String) checkAttribute(SECURITY_CLIENT_ACCESSOR_PP, value);
+    securityClientAccessorPP = (String) value;
   }
 
   public int getSecurityLogLevel() {
@@ -1960,7 +1985,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityLogLevel(int value) {
-    securityLogLevel = (Integer) checkAttribute(SECURITY_LOG_LEVEL, value);
+    securityLogLevel = (Integer) value;
   }
 
   public File getSecurityLogFile() {
@@ -1968,7 +1993,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityLogFile(File value) {
-    securityLogFile = (File) checkAttribute(SECURITY_LOG_FILE, value);
+    securityLogFile = (File) value;
   }
 
   public int getSecurityPeerMembershipTimeout() {
@@ -1976,7 +2001,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setSecurityPeerMembershipTimeout(int value) {
-    securityPeerMembershipTimeout = (Integer) checkAttribute(SECURITY_PEER_VERIFY_MEMBER_TIMEOUT, value);
+    securityPeerMembershipTimeout = (Integer) value;
   }
 
   public Properties getSecurityProps() {
@@ -2006,7 +2031,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setDistributedSystemId(int distributedSystemId) {
-    this.distributedSystemId = (Integer) checkAttribute(DISTRIBUTED_SYSTEM_ID, distributedSystemId);
+    this.distributedSystemId = (Integer) distributedSystemId;
 
   }
 
@@ -2020,12 +2045,12 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setEnforceUniqueHost(boolean enforceUniqueHost) {
-    this.enforceUniqueHost = (Boolean) checkAttribute(ENFORCE_UNIQUE_HOST, enforceUniqueHost);
+    this.enforceUniqueHost = (Boolean) enforceUniqueHost;
 
   }
 
   public void setRedundancyZone(String redundancyZone) {
-    this.redundancyZone = (String) checkAttribute(REDUNDANCY_ZONE, redundancyZone);
+    this.redundancyZone = (String) redundancyZone;
 
   }
 
@@ -2074,7 +2099,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
     if (value == null) {
       value = DEFAULT_GROUPS;
     }
-    this.groups = (String) checkAttribute(GROUPS, value);
+    this.groups = (String) value;
   }
 
   @Override
@@ -2138,31 +2163,31 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
   }
 
   public void setJmxManagerSSLKeyStore(String value) {
-    value = (String) checkAttribute(JMX_MANAGER_SSL_KEYSTORE, value);
+    
     this.getJmxSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_NAME, value);
     this.jmxManagerSSLKeyStore = value;
   }
 
   public void setJmxManagerSSLKeyStoreType(String value) {
-    value = (String) checkAttribute(JMX_MANAGER_SSL_KEYSTORE_TYPE, value);
+    
     this.getJmxSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_TYPE_NAME, value);
     this.jmxManagerSSLKeyStoreType = value;
   }
 
   public void setJmxManagerSSLKeyStorePassword(String value) {
-    value = (String) checkAttribute(JMX_MANAGER_SSL_KEYSTORE_PASSWORD, value);
+    
     this.getJmxSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_PASSWORD_NAME, value);
     this.jmxManagerSSLKeyStorePassword = value;
   }
 
   public void setJmxManagerSSLTrustStore(String value) {
-    value = (String) checkAttribute(JMX_MANAGER_SSL_TRUSTSTORE, value);
+    
     this.getJmxSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_NAME, value);
     this.jmxManagerSSLTrustStore = value;
   }
 
   public void setJmxManagerSSLTrustStorePassword(String value) {
-    value = (String) checkAttribute(JMX_MANAGER_SSL_TRUSTSTORE_PASSWORD, value);
+    
     this.getJmxSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_PASSWORD_NAME, value);
     this.jmxManagerSSLTrustStorePassword = value;
   }
@@ -2194,7 +2219,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setJmxManagerPort(int value) {
-    this.jmxManagerPort = (Integer) checkAttribute(JMX_MANAGER_PORT, value);
+    this.jmxManagerPort = (Integer) value;
   }
 
   @Override
@@ -2207,7 +2232,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
     if (value == null) {
       value = "";
     }
-    this.jmxManagerBindAddress = (String) checkAttribute(JMX_MANAGER_BIND_ADDRESS, value);
+    this.jmxManagerBindAddress = (String) value;
   }
 
   @Override
@@ -2220,7 +2245,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
     if (value == null) {
       value = "";
     }
-    this.jmxManagerHostnameForClients = (String) checkAttribute(JMX_MANAGER_HOSTNAME_FOR_CLIENTS, value);
+    this.jmxManagerHostnameForClients = (String) value;
   }
 
   @Override
@@ -2233,7 +2258,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
     if (value == null) {
       value = "";
     }
-    this.jmxManagerPasswordFile = (String) checkAttribute(JMX_MANAGER_PASSWORD_FILE, value);
+    this.jmxManagerPasswordFile = (String) value;
   }
 
   @Override
@@ -2246,7 +2271,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
     if (value == null) {
       value = "";
     }
-    this.jmxManagerAccessFile = (String) checkAttribute(JMX_MANAGER_ACCESS_FILE, value);
+    this.jmxManagerAccessFile = (String) value;
   }
 
   @Override
@@ -2266,7 +2291,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setJmxManagerUpdateRate(int value) {
-    this.jmxManagerUpdateRate = (Integer) checkAttribute(JMX_MANAGER_UPDATE_RATE, value);
+    this.jmxManagerUpdateRate = (Integer) value;
   }
 
   @Override
@@ -3241,14 +3266,14 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
    * @see com.gemstone.gemfire.distributed.internal.DistributionConfig#setMembershipPortRange(int[])
    */
   public void setMembershipPortRange(int[] range) {
-    membershipPortRange = (int[]) checkAttribute(MEMBERSHIP_PORT_RANGE, range);
+    membershipPortRange = (int[]) range;
   }
 
   /**
    * Set the host-port information of remote site locator
    */
   public void setRemoteLocators(String value) {
-    this.remoteLocators = (String) checkAttribute(REMOTE_LOCATORS, value);
+    this.remoteLocators = (String) value;
   }
 
   /**
@@ -3269,7 +3294,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setMemcachedPort(int value) {
-    this.memcachedPort = (Integer) checkAttribute(MEMCACHED_PORT, value);
+    this.memcachedPort = (Integer) value;
   }
 
   @Override
@@ -3279,7 +3304,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setMemcachedProtocol(String protocol) {
-    this.memcachedProtocol = (String) checkAttribute(MEMCACHED_PROTOCOL, protocol);
+    this.memcachedProtocol = (String) protocol;
   }
 
   @Override
@@ -3289,7 +3314,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setRedisPort(int value) {
-    this.redisPort = (Integer) checkAttribute(REDIS_PORT, value);
+    this.redisPort = (Integer) value;
   }
 
   @Override
@@ -3299,7 +3324,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setRedisBindAddress(String bindAddress) {
-    this.redisBindAddress = (String) checkAttribute(REDIS_BIND_ADDRESS, bindAddress);
+    this.redisBindAddress = (String) bindAddress;
   }
 
   @Override
@@ -3319,7 +3344,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setOffHeapMemorySize(String value) {
-    this.offHeapMemorySize = (String) checkAttribute(OFF_HEAP_MEMORY_SIZE, value);
+    this.offHeapMemorySize = (String) value;
   }
 
   @Override
@@ -3329,12 +3354,12 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setMemcachedBindAddress(String bindAddress) {
-    this.memcachedBindAddress = (String) checkAttribute(MEMCACHED_BIND_ADDRESS, bindAddress);
+    this.memcachedBindAddress = (String) bindAddress;
   }
 
   @Override
   public void setEnableClusterConfiguration(boolean value) {
-    this.enableSharedConfiguration = (Boolean) checkAttribute(ENABLE_CLUSTER_CONFIGURATION, value);
+    this.enableSharedConfiguration = (Boolean) value;
   }
 
   @Override
@@ -3345,7 +3370,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setUseSharedConfiguration(boolean newValue) {
-    this.useSharedConfiguration = (Boolean) checkAttribute(USE_CLUSTER_CONFIGURATION, newValue);
+    this.useSharedConfiguration = (Boolean) newValue;
   }
 
   @Override
@@ -3355,7 +3380,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setLoadClusterConfigFromDir(boolean newValue) {
-    this.loadSharedConfigurationFromDir = (Boolean) checkAttribute(LOAD_CLUSTER_CONFIGURATION_FROM_DIR, newValue);
+    this.loadSharedConfigurationFromDir = (Boolean) newValue;
   }
 
   @Override
@@ -3365,7 +3390,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setClusterConfigDir(String clusterConfigDir) {
-    this.clusterConfigDir = (String) checkAttribute(CLUSTER_CONFIGURATION_DIR, clusterConfigDir);
+    this.clusterConfigDir = (String) clusterConfigDir;
   }
 
   @Override
@@ -3380,7 +3405,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setServerSSLEnabled(boolean value) {
-    this.serverSSLEnabled = (Boolean) checkAttribute(SERVER_SSL_ENABLED, value);
+    this.serverSSLEnabled = (Boolean) value;
 
   }
 
@@ -3391,7 +3416,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setServerSSLRequireAuthentication(boolean value) {
-    this.serverSslRequireAuthentication = (Boolean) checkAttribute(SERVER_SSL_REQUIRE_AUTHENTICATION, value);
+    this.serverSslRequireAuthentication = (Boolean) value;
   }
 
   @Override
@@ -3401,7 +3426,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setServerSSLProtocols(String protocols) {
-    this.serverSslProtocols = (String) checkAttribute(SERVER_SSL_PROTOCOLS, protocols);
+    this.serverSslProtocols = (String) protocols;
   }
 
   @Override
@@ -3411,35 +3436,30 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setServerSSLCiphers(String ciphers) {
-    this.serverSslCiphers = (String) checkAttribute(SERVER_SSL_CIPHERS, ciphers);
+    this.serverSslCiphers = (String) ciphers;
   }
 
   public void setServerSSLKeyStore(String value) {
-    value = (String) checkAttribute(SERVER_SSL_KEYSTORE, value);
     this.getServerSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_NAME, value);
     this.serverSSLKeyStore = value;
   }
 
   public void setServerSSLKeyStoreType(String value) {
-    value = (String) checkAttribute(SERVER_SSL_KEYSTORE_TYPE, value);
     this.getServerSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_TYPE_NAME, value);
     this.serverSSLKeyStoreType = value;
   }
 
   public void setServerSSLKeyStorePassword(String value) {
-    value = (String) checkAttribute(SERVER_SSL_KEYSTORE_PASSWORD, value);
     this.getServerSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_PASSWORD_NAME, value);
     this.serverSSLKeyStorePassword = value;
   }
 
   public void setServerSSLTrustStore(String value) {
-    value = (String) checkAttribute(SERVER_SSL_TRUSTSTORE, value);
     this.getServerSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_NAME, value);
     this.serverSSLTrustStore = value;
   }
 
   public void setServerSSLTrustStorePassword(String value) {
-    value = (String) checkAttribute(SERVER_SSL_TRUSTSTORE_PASSWORD, value);
     this.getServerSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_PASSWORD_NAME, value);
     this.serverSSLTrustStorePassword = value;
   }
@@ -3476,7 +3496,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setGatewaySSLEnabled(boolean value) {
-    this.gatewaySSLEnabled = (Boolean) checkAttribute(SERVER_SSL_ENABLED, value);
+    this.gatewaySSLEnabled = (Boolean) value;
 
   }
 
@@ -3487,7 +3507,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setGatewaySSLRequireAuthentication(boolean value) {
-    this.gatewaySslRequireAuthentication = (Boolean) checkAttribute(GATEWAY_SSL_REQUIRE_AUTHENTICATION, value);
+    this.gatewaySslRequireAuthentication = (Boolean) value;
   }
 
   @Override
@@ -3497,7 +3517,7 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setGatewaySSLProtocols(String protocols) {
-    this.gatewaySslProtocols = (String) checkAttribute(SERVER_SSL_PROTOCOLS, protocols);
+    this.gatewaySslProtocols = (String) protocols;
   }
 
   @Override
@@ -3507,35 +3527,30 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setGatewaySSLCiphers(String ciphers) {
-    this.gatewaySslCiphers = (String) checkAttribute(GATEWAY_SSL_CIPHERS, ciphers);
+    this.gatewaySslCiphers = (String) ciphers;
   }
 
   public void setGatewaySSLKeyStore(String value) {
-    checkAttribute(GATEWAY_SSL_KEYSTORE, value);
     this.getGatewaySSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_NAME, value);
     this.gatewaySSLKeyStore = value;
   }
 
   public void setGatewaySSLKeyStoreType(String value) {
-    checkAttribute(GATEWAY_SSL_KEYSTORE_TYPE, value);
     this.getGatewaySSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_TYPE_NAME, value);
     this.gatewaySSLKeyStoreType = value;
   }
 
   public void setGatewaySSLKeyStorePassword(String value) {
-    checkAttribute(GATEWAY_SSL_KEYSTORE_PASSWORD, value);
     this.getGatewaySSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_PASSWORD_NAME, value);
     this.gatewaySSLKeyStorePassword = value;
   }
 
   public void setGatewaySSLTrustStore(String value) {
-    checkAttribute(GATEWAY_SSL_TRUSTSTORE, value);
     this.getGatewaySSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_NAME, value);
     this.gatewaySSLTrustStore = value;
   }
 
   public void setGatewaySSLTrustStorePassword(String value) {
-    checkAttribute(GATEWAY_SSL_TRUSTSTORE_PASSWORD, value);
     this.getGatewaySSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_PASSWORD_NAME, value);
     this.gatewaySSLTrustStorePassword = value;
   }
@@ -3614,7 +3629,6 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setHttpServiceSSLKeyStore(String httpServiceSSLKeyStore) {
-    checkAttribute(HTTP_SERVICE_SSL_KEYSTORE, httpServiceSSLKeyStore);
     this.getHttpServiceSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_NAME, httpServiceSSLKeyStore);
     this.httpServiceSSLKeyStore = httpServiceSSLKeyStore;
   }
@@ -3626,7 +3640,6 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setHttpServiceSSLKeyStoreType(String httpServiceSSLKeyStoreType) {
-    checkAttribute(HTTP_SERVICE_SSL_KEYSTORE_TYPE, httpServiceSSLKeyStoreType);
     this.getHttpServiceSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_TYPE_NAME, httpServiceSSLKeyStoreType);
     this.httpServiceSSLKeyStoreType = httpServiceSSLKeyStoreType;
   }
@@ -3638,7 +3651,6 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setHttpServiceSSLKeyStorePassword(String httpServiceSSLKeyStorePassword) {
-    checkAttribute(HTTP_SERVICE_SSL_KEYSTORE_PASSWORD, httpServiceSSLKeyStorePassword);
     this.getHttpServiceSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + KEY_STORE_PASSWORD_NAME, httpServiceSSLKeyStorePassword);
     this.httpServiceSSLKeyStorePassword = httpServiceSSLKeyStorePassword;
   }
@@ -3650,7 +3662,6 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setHttpServiceSSLTrustStore(String httpServiceSSLTrustStore) {
-    checkAttribute(HTTP_SERVICE_SSL_TRUSTSTORE, httpServiceSSLTrustStore);
     this.getHttpServiceSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_NAME, httpServiceSSLTrustStore);
     this.httpServiceSSLTrustStore = httpServiceSSLTrustStore;
   }
@@ -3662,7 +3673,6 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
 
   @Override
   public void setHttpServiceSSLTrustStorePassword(String httpServiceSSLTrustStorePassword) {
-    checkAttribute(HTTP_SERVICE_SSL_TRUSTSTORE_PASSWORD, httpServiceSSLTrustStorePassword);
     this.getHttpServiceSSLProperties().setProperty(SSL_SYSTEM_PROPS_NAME + TRUST_STORE_PASSWORD_NAME, httpServiceSSLTrustStorePassword);
     this.httpServiceSSLTrustStorePassword = httpServiceSSLTrustStorePassword;
   }
