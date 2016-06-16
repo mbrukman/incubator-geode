@@ -16,44 +16,20 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.gemstone.gemfire.cache.lucene.test;
+package com.gemstone.gemfire.cache.lucene.internal.repository.serializer;
 
-import java.io.Serializable;
+import com.gemstone.gemfire.cache.lucene.LuceneService;
 
-public class TestObject implements Serializable {
+import org.apache.lucene.document.Document;
 
-  private String field1 = "hello world";
-  private String field2 = "this is a field";
+/**
+ * A LuceneSerializer that can serialize a primitive value (String, int, long, double)
+ * by creating a document with a special field containing the value
+ */
+public class PrimitiveSerializer implements LuceneSerializer {
 
-  public TestObject() {
-
-  }
-
-  public TestObject(final String field1, final String field2) {
-    this.field1 = field1;
-    this.field2 = field2;
-  }
-
-  public String getField1() {
-    return field1;
-  }
-
-  public void setField1(final String field1) {
-    this.field1 = field1;
-  }
-
-  public String getField2() {
-    return field2;
-  }
-
-  public void setField2(final String field2) {
-    this.field2 = field2;
-  }
-  
   @Override
-  public boolean equals(Object obj) {
-    TestObject testObject = (TestObject)obj;
-    return (testObject.field1.equals(field1) && testObject.field2.equals(field2));
+  public void toDocument(final Object value, final Document doc) {
+    SerializerUtil.addField(doc, LuceneService.REGION_VALUE_FIELD, value);
   }
-
 }
