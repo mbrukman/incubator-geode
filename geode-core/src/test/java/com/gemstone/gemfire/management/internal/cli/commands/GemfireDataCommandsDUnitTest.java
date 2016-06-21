@@ -16,7 +16,36 @@
  */
 package com.gemstone.gemfire.management.internal.cli.commands;
 
-import com.gemstone.gemfire.cache.*;
+import static com.gemstone.gemfire.distributed.ConfigurationProperties.*;
+import static com.gemstone.gemfire.test.dunit.Assert.*;
+import static com.gemstone.gemfire.test.dunit.IgnoredException.*;
+import static com.gemstone.gemfire.test.dunit.LogWriterUtils.*;
+import static com.gemstone.gemfire.test.dunit.Wait.*;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Random;
+import java.util.Set;
+
+import org.junit.Ignore;
+import org.junit.Test;
+import org.junit.experimental.categories.Category;
+
+import com.gemstone.gemfire.cache.Cache;
+import com.gemstone.gemfire.cache.CacheFactory;
+import com.gemstone.gemfire.cache.DataPolicy;
+import com.gemstone.gemfire.cache.PartitionAttributes;
+import com.gemstone.gemfire.cache.PartitionAttributesFactory;
+import com.gemstone.gemfire.cache.Region;
+import com.gemstone.gemfire.cache.RegionFactory;
+import com.gemstone.gemfire.cache.RegionShortcut;
 import com.gemstone.gemfire.cache.query.QueryInvalidException;
 import com.gemstone.gemfire.cache.query.data.Portfolio;
 import com.gemstone.gemfire.cache.query.internal.CompiledValue;
@@ -32,7 +61,11 @@ import com.gemstone.gemfire.management.cli.Result;
 import com.gemstone.gemfire.management.internal.cli.CliUtil;
 import com.gemstone.gemfire.management.internal.cli.HeadlessGfsh;
 import com.gemstone.gemfire.management.internal.cli.domain.DataCommandRequest;
-import com.gemstone.gemfire.management.internal.cli.dto.*;
+import com.gemstone.gemfire.management.internal.cli.dto.Car;
+import com.gemstone.gemfire.management.internal.cli.dto.Key1;
+import com.gemstone.gemfire.management.internal.cli.dto.ObjectWithCharAttr;
+import com.gemstone.gemfire.management.internal.cli.dto.Value1;
+import com.gemstone.gemfire.management.internal.cli.dto.Value2;
 import com.gemstone.gemfire.management.internal.cli.i18n.CliStrings;
 import com.gemstone.gemfire.management.internal.cli.json.GfJsonArray;
 import com.gemstone.gemfire.management.internal.cli.json.GfJsonException;
@@ -42,21 +75,14 @@ import com.gemstone.gemfire.management.internal.cli.result.CompositeResultData.S
 import com.gemstone.gemfire.management.internal.cli.result.ResultData;
 import com.gemstone.gemfire.management.internal.cli.result.TabularResultData;
 import com.gemstone.gemfire.management.internal.cli.util.CommandStringBuilder;
-import com.gemstone.gemfire.test.dunit.*;
+import com.gemstone.gemfire.test.dunit.Host;
+import com.gemstone.gemfire.test.dunit.IgnoredException;
+import com.gemstone.gemfire.test.dunit.SerializableCallable;
+import com.gemstone.gemfire.test.dunit.SerializableRunnable;
+import com.gemstone.gemfire.test.dunit.VM;
+import com.gemstone.gemfire.test.dunit.WaitCriterion;
 import com.gemstone.gemfire.test.junit.categories.DistributedTest;
 import com.gemstone.gemfire.test.junit.categories.FlakyTest;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.*;
-
-import static com.gemstone.gemfire.test.dunit.Assert.*;
-import static com.gemstone.gemfire.test.dunit.IgnoredException.addIgnoredException;
-import static com.gemstone.gemfire.test.dunit.LogWriterUtils.getLogWriter;
-import static com.gemstone.gemfire.test.dunit.Wait.waitForCriterion;
-import static com.gemstone.gemfire.distributed.ConfigurationProperties.*;
 
 /**
  * Dunit class for testing gemfire data commands : get, put, remove, select, rebalance
@@ -1741,7 +1767,6 @@ public class GemfireDataCommandsDUnitTest extends CliCommandTestBase {
     }
   }
 
-  @Category(FlakyTest.class) // GEODE-1484
   @Test
   public void testRebalanceCommandForSimulate() {
     setupTestRebalanceForEntireDS();
@@ -1763,7 +1788,6 @@ public class GemfireDataCommandsDUnitTest extends CliCommandTestBase {
     }
   }
 
-  @Category(FlakyTest.class)
   @Test
   public void testRebalanceCommandForSimulateWithNoMember() {
     setupTestRebalanceForEntireDS();
@@ -1788,7 +1812,6 @@ public class GemfireDataCommandsDUnitTest extends CliCommandTestBase {
     }
   }
 
-  @Category(FlakyTest.class) // GEODE-1483
   @Test
   public void testRebalanceForIncludeRegionFunction() {
     // setup();
@@ -1810,7 +1833,6 @@ public class GemfireDataCommandsDUnitTest extends CliCommandTestBase {
     }
   }
 
-  @Category(FlakyTest.class) // GEODE-1551: org.eclipse.jetty.io.EofException
   @Test
   public void testSimulateForEntireDS() {
     setupTestRebalanceForEntireDS();
@@ -1818,7 +1840,7 @@ public class GemfireDataCommandsDUnitTest extends CliCommandTestBase {
     final VM manager = Host.getHost(0).getVM(0);
     manager.invoke(checkRegionMBeans);
 
-    getLogWriter().info("testSimulateForEntireDS verified Mbean and executin command");
+    getLogWriter().info("testSimulateForEntireDS verified MBean and executing command");
 
     String command = "rebalance --simulate=true";
 
@@ -1835,7 +1857,31 @@ public class GemfireDataCommandsDUnitTest extends CliCommandTestBase {
     }
   }
 
-  @Category(FlakyTest.class) // GEODE-1487
+  @Ignore("TODO: enable test after GEODE-1574 is fixed")
+  @Test
+  public void testSimulateForEntireDSWithTimeout() {
+    setupTestRebalanceForEntireDS();
+    //check if DistributedRegionMXBean is available so that command will not fail
+    final VM manager = Host.getHost(0).getVM(0);
+    manager.invoke(checkRegionMBeans);
+
+    getLogWriter().info("testSimulateForEntireDS verified MBean and executing command");
+
+    String command = "rebalance --simulate=true --time-out=-1";
+
+    CommandResult cmdResult = executeCommand(command);
+
+    getLogWriter().info("testSimulateForEntireDS just after executing " + cmdResult);
+
+    if (cmdResult != null) {
+      String stringResult = commandResultToString(cmdResult);
+      getLogWriter().info("testSimulateForEntireDS stringResult : " + stringResult);
+      assertEquals(Result.Status.OK, cmdResult.getStatus());
+    } else {
+      fail("testRebalanceForIncludeRegionFunction failed as did not get CommandResult");
+    }
+  }
+
   @Test
   public void testRebalanceForEntireDS() {
     setupTestRebalanceForEntireDS();
@@ -1926,7 +1972,6 @@ public class GemfireDataCommandsDUnitTest extends CliCommandTestBase {
     }
   }
 
-  @Category(FlakyTest.class)
   @Test
   public void testRebalanceForExcludeRegionFunction() {
     setupWith2Regions();
@@ -1944,7 +1989,7 @@ public class GemfireDataCommandsDUnitTest extends CliCommandTestBase {
     if (cmdResult != null) {
       String stringResult = commandResultToString(cmdResult);
       getLogWriter().info("testRebalanceForExcludeRegionFunction stringResult : " + stringResult);
-      assertEquals(Result.Status.OK, cmdResult.getStatus());
+      assertEquals("CommandResult=" + cmdResult, Result.Status.OK, cmdResult.getStatus());
     } else {
       fail("testRebalanceForIncludeRegionFunction failed as did not get CommandResult");
     }

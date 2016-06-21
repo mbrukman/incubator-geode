@@ -42,7 +42,7 @@ import org.junit.runners.Suite;
   DeployCommandsDUnitTest.class,
   DiskStoreCommandsDUnitTest.class,
   FunctionCommandsDUnitTest.class,
-  GemfireDataCommandsDUnitTest.class, // TODO: fix GEODE-1565
+  GemfireDataCommandsDUnitTest.class,
   GetCommandOnRegionWithCacheLoaderDuringCacheMissDUnitTest.class,
   IndexCommandsDUnitTest.class,
   ListAndDescribeDiskStoreCommandsDUnitTest.class,
