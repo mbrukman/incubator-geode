@@ -2071,6 +2071,14 @@ public class DistributionConfigImpl extends AbstractDistributionConfig implement
         // use sslProperties as base and let props with suffix GATEWAY_SSL_PROPS_SUFFIX override that base
         this.gatewaySslProperties.setProperty(attName, attValue);
       }
+      if (!this.httpServiceSSLProperties.containsKey(attName)) {
+        // use sslProperties as base and let props with suffix GATEWAY_SSL_PROPS_SUFFIX override that base
+        this.httpServiceSSLProperties.setProperty(attName, attValue);
+      }
+      if (!this.clusterSSLProperties.containsKey(attName)) {
+        // use sslProperties as base and let props with suffix GATEWAY_SSL_PROPS_SUFFIX override that base
+        this.clusterSSLProperties.setProperty(attName, attValue);
+      }
     }
   }
 
