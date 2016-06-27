@@ -541,12 +541,6 @@ public class TombstoneService {
       return this.tombstones;
     }
 
-    /** force a batch GC */
-    void forceBatchExpiration() {
-      this.forceBatchExpiration = true;
-      //this.forceExpirationCount = EXPIRED_TOMBSTONE_LIMIT - this.expiredTombstones.size() + 1;
-    }
-    
     void scheduleTombstone(Tombstone ts) {
       this.tombstones.add(ts);
       this.queueSize.addAndGet(ts.getSize());
