@@ -3359,7 +3359,7 @@ public class LocalRegion extends AbstractRegion
       return;
     }
     if (!this.versionVector.containsTombstoneGCVersions(regionGCVersions)) {
-      keys = this.cache.getTombstoneService().gcTombstones(this, regionGCVersions);
+      keys = this.cache.getTombstoneService().gcTombstones(this, regionGCVersions, needsTombstoneGCKeysForClients(eventID, clientRouting));
       if (keys == null) {
         // deltaGII prevented tombstone GC
         return;
@@ -3377,6 +3377,9 @@ public class LocalRegion extends AbstractRegion
   }
   
 
+  protected boolean needsTombstoneGCKeysForClients(EventID eventID, FilterInfo clientRouting) {
+    return false;
+  }
   /** pass tombstone garbage-collection info to clients 
    * @param eventID the ID of the event (see bug #50683)
    * @param routing routing info (routing is computed if this is null)

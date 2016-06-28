@@ -504,7 +504,7 @@ public class InitialImageOperation  {
           //Make sure we have applied the tombstone GC as seen on the GII
           //source
           if(this.gcVersions != null) {
-            region.getGemFireCache().getTombstoneService().gcTombstones(region, this.gcVersions);
+            region.getGemFireCache().getTombstoneService().gcTombstones(region, this.gcVersions, false);
           }
           
           if (this.gotImage) {

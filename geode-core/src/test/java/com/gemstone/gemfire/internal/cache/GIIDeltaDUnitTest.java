@@ -352,7 +352,7 @@ public class GIIDeltaDUnitTest extends JUnit4CacheTestCase {
    * create some exception list.
    * Before GII, P's RVV is P6,R6(3-6), R's RVV is P6,R6, RVVGC are both P4,R0   
    * vm1 becomes offline then restarts.
-   * The deltaGII should send delta which only contains unfinished opeation R4,R5  
+   * The deltaGII should send delta which only contains unfinished operation R4,R5  
    */
   @Test
   public void testDeltaGIIWithOnlyUnfinishedOp() throws Throwable {
