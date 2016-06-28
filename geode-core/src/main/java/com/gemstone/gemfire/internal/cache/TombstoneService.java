@@ -465,23 +465,30 @@ public class TombstoneService {
       this.sweeperThread.setName(threadName);
     }
 
-  public void foreachTombstone(Predicate<Tombstone> predicate) {
+    /**
+     * @return true if predicate ever returned true
+     */
+  public boolean foreachTombstone(Predicate<Tombstone> predicate) {
+    boolean result = false;
     Tombstone currentTombstone = lockAndGetCurrentTombstone();
     try {
       if (currentTombstone != null) {
         if (predicate.test(currentTombstone)) {
           clearCurrentTombstone();
+          result = true;
         }
       }
       for (Iterator<Tombstone> it=getQueue().iterator(); it.hasNext(); ) {
         Tombstone t = it.next();
         if (predicate.test(t)) {
           it.remove();
+          result = true;
         }
       }
     } finally {
       unlock();
     }
+    return result;
   }
 
   synchronized void start() {
@@ -749,13 +756,11 @@ public class TombstoneService {
                   incQueueSize(-myTombstone.getSize());
                   myTombstone.region.getRegionMap().removeTombstone(myTombstone.entry, myTombstone, false, true);
                 }
-                myTombstone = null;
                 clearCurrentTombstone();
               } catch (CancelException e) {
                 return;
               } catch (Exception e) {
                 logger.warn(LocalizedMessage.create(LocalizedStrings.GemFireCacheImpl_TOMBSTONE_ERROR), e);
-                myTombstone = null;
                 clearCurrentTombstone();
               }
             }
@@ -767,33 +772,27 @@ public class TombstoneService {
                 lastScanTime = now;
                 long start = now;
                 // see if any have been superseded
-                for (Iterator<Tombstone> it = getQueue().iterator(); it.hasNext(); ) {
-                  Tombstone test = it.next();
+                boolean scanHit = foreachTombstone(test -> {
                   if (test.region.getRegionMap().isTombstoneNotNeeded(test.entry, test.getEntryVersion())) {
                     if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
                       logger.trace(LogMarker.TOMBSTONE, "removing obsolete tombstone: {}", test);
                     }
-                    it.remove();
                     incQueueSize(-test.getSize());
-                    if (test == myTombstone) {
-                      myTombstone = null;
-                      clearCurrentTombstone();
-                      sleepTime = 0;
-                    }
-                  } else if (batchMode && (test.getVersionTimeStamp()+expiryTime) <= now) {
-                    it.remove();
+                    return true;
+                  }
+                  if (batchMode && (test.getVersionTimeStamp()+expiryTime) <= now) {
                     if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
                       logger.trace(LogMarker.TOMBSTONE, "expiring tombstone {}", test);
                     }
                     expiredTombstones.add(test);
-                    sleepTime = 0;
-                    if (test == myTombstone) {
-                      myTombstone = null;
-                      clearCurrentTombstone();
-                    }
+                    return true;
                   }
+                  return false;
+                });
+                if (scanHit) {
+                  sleepTime = 0;
                 }
-                // now check the batch of timed-out tombstones, if there is one
+                // now scan the batch of timed-out tombstones
                 if (batchMode) {
                   for (Iterator<Tombstone> it = expiredTombstones.iterator(); it.hasNext(); ) {
                     Tombstone test = it.next();
@@ -803,11 +802,7 @@ public class TombstoneService {
                       }
                       it.remove();
                       incQueueSize(-test.getSize());
-                      if (test == myTombstone) {
-                        myTombstone = null;
-                        clearCurrentTombstone();
-                        sleepTime = 0;
-                      }
+                      sleepTime = 0;
                     }
                   }
                 }
