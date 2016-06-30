@@ -16,9 +16,11 @@
  */
 package com.gemstone.gemfire.internal.cache;
 
+import com.gemstone.gemfire.CancelCriterion;
 import com.gemstone.gemfire.CancelException;
 import com.gemstone.gemfire.SystemFailure;
 import com.gemstone.gemfire.cache.util.ObjectSizer;
+import com.gemstone.gemfire.distributed.internal.CacheTime;
 import com.gemstone.gemfire.distributed.internal.DistributionConfig;
 import com.gemstone.gemfire.internal.cache.versions.CompactVersionHolder;
 import com.gemstone.gemfire.internal.cache.versions.VersionSource;
@@ -35,6 +37,7 @@ import org.apache.logging.log4j.Logger;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
@@ -121,8 +124,8 @@ public class TombstoneService {
   }
   
   private TombstoneService(GemFireCacheImpl cache) {
-    this.replicatedTombstoneSweeper = new ReplicateTombstoneSweeper(cache);
-    this.nonReplicatedTombstoneSweeper = new NonReplicateTombstoneSweeper(cache);
+    this.replicatedTombstoneSweeper = new ReplicateTombstoneSweeper(cache, cache.getCachePerfStats(), cache.getCancelCriterion(), cache.getDistributionManager().getWaitingThreadPool());
+    this.nonReplicatedTombstoneSweeper = new NonReplicateTombstoneSweeper(cache, cache.getCachePerfStats(), cache.getCancelCriterion());
     this.replicatedTombstoneSweeper.start();
     this.nonReplicatedTombstoneSweeper.start();
   }
@@ -338,8 +341,8 @@ public class TombstoneService {
     }
   }
   private static class NonReplicateTombstoneSweeper extends TombstoneSweeper {
-    NonReplicateTombstoneSweeper(GemFireCacheImpl cache) {
-      super(cache, NON_REPLICATE_TOMBSTONE_TIMEOUT, "Non-replicate Region Garbage Collector");
+    NonReplicateTombstoneSweeper(CacheTime cacheTime, CachePerfStats stats, CancelCriterion cancelCriterion) {
+      super(cacheTime, stats, cancelCriterion, NON_REPLICATE_TOMBSTONE_TIMEOUT, "Non-replicate Region Garbage Collector");
     }
 
     @Override
@@ -347,7 +350,7 @@ public class TombstoneService {
       return false;
     }
     @Override protected void updateStatistics() {
-      cache.getCachePerfStats().setNonReplicatedTombstonesSize(getMemoryEstimate());
+      stats.setNonReplicatedTombstonesSize(getMemoryEstimate());
     }
     @Override protected boolean hasExpired(long msTillHeadTombstoneExpires) {
       return msTillHeadTombstoneExpires <= 0;
@@ -379,6 +382,10 @@ public class TombstoneService {
   }
 
   private static class ReplicateTombstoneSweeper extends TombstoneSweeper {
+    /**
+     * Used to execute batch gc message execution in the background.
+     */
+    private final ExecutorService executor;
     /**
      * tombstones that have expired and are awaiting batch removal.  This
      * variable is only accessed by the sweeper thread and so is not guarded
@@ -413,9 +420,10 @@ public class TombstoneService {
      */
     private int testHook_forceExpirationCount = 0;
 
-    ReplicateTombstoneSweeper(GemFireCacheImpl cache) {
-      super(cache, REPLICATE_TOMBSTONE_TIMEOUT, "Replicate/Partition Region Garbage Collector");
+    ReplicateTombstoneSweeper(CacheTime cacheTime, CachePerfStats stats, CancelCriterion cancelCriterion, ExecutorService executor) {
+      super(cacheTime, stats, cancelCriterion, REPLICATE_TOMBSTONE_TIMEOUT, "Replicate/Partition Region Garbage Collector");
       this.expiredTombstones = new ArrayList<Tombstone>();
+      this.executor = executor;
     }
     
     public int decrementGCBlockCount() {
@@ -532,7 +540,7 @@ public class TombstoneService {
 
         // do messaging in a pool so this thread is not stuck trying to
         // communicate with other members
-        cache.getDistributionManager().getWaitingThreadPool().execute(new Runnable() {
+        executor.execute(new Runnable() {
           public void run() {
             try {
               // this thread should not reference other sweeper state, which is not synchronized
@@ -586,7 +594,7 @@ public class TombstoneService {
       }
     }
     @Override protected void updateStatistics() {
-      cache.getCachePerfStats().setReplicatedTombstonesSize(getMemoryEstimate());
+      stats.setReplicatedTombstonesSize(getMemoryEstimate());
     }
     private void checkIfBatchExpirationShouldBeForced() {
       if (testHook_forceExpirationCount > 0) {
@@ -704,26 +712,27 @@ public class TombstoneService {
     private final StoppableReentrantLock queueHeadLock;
     
 
-    /**
-     * the cache that owns all of the tombstones in this sweeper
-     */
-    protected final GemFireCacheImpl cache;
+    protected final CacheTime cacheTime;
+    protected final CachePerfStats stats;
+    private final CancelCriterion cancelCriterion;
     
     private volatile boolean isStopped;
     
-    TombstoneSweeper(GemFireCacheImpl cache,
+    TombstoneSweeper(CacheTime cacheTime, CachePerfStats stats, CancelCriterion cancelCriterion, 
         long expiryTime,
         String threadName) {
-      this.cache = cache;
+      this.cacheTime = cacheTime;
+      this.stats = stats;
+      this.cancelCriterion = cancelCriterion;
       this.EXPIRY_TIME = expiryTime;
       this.PURGE_INTERVAL = Math.min(DEFUNCT_TOMBSTONE_SCAN_INTERVAL, expiryTime);
       this.tombstones = new ConcurrentLinkedQueue<Tombstone>();
       this.memoryUsedEstimate = new AtomicLong();
-      this.queueHeadLock = new StoppableReentrantLock(cache.getCancelCriterion());
+      this.queueHeadLock = new StoppableReentrantLock(cancelCriterion);
       this.sweeperThread = new Thread(LoggingThreadGroup.createThreadGroup("Destroyed Entries Processors", logger), this);
       this.sweeperThread.setDaemon(true);
       this.sweeperThread.setName(threadName);
-      this.lastPurgeTimestamp = this.cache.cacheTimeMillis();
+      this.lastPurgeTimestamp = getNow();
     }
 
     public void unscheduleTombstones(final LocalRegion r) {
@@ -823,11 +832,11 @@ public class TombstoneService {
       if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
         logger.trace(LogMarker.TOMBSTONE, "Destroyed entries sweeper starting with default sleep interval={}", this.EXPIRY_TIME);
       }
-      while (!isStopped && cache.getCancelCriterion().cancelInProgress() == null) {
+      while (!isStopped && cancelCriterion.cancelInProgress() == null) {
         try {
           updateStatistics();
           SystemFailure.checkFailure();
-          final long now = this.cache.cacheTimeMillis();
+          final long now = getNow();
           checkExpiredTombstones();
           checkOldestUnexpired(now);
           purgeObsoleteTombstones(now);
@@ -845,6 +854,10 @@ public class TombstoneService {
         }
       } // while()
     } // run()
+
+    private long getNow() {
+      return cacheTime.cacheTimeMillis();
+    }
 
     private void doSleep() {
       if (sleepTime <= 0) {
@@ -894,7 +907,7 @@ public class TombstoneService {
       if (removedObsoleteTombstone) {
         sleepTime = 0;
       } else {
-        long elapsed = this.cache.cacheTimeMillis() - start;
+        long elapsed = getNow() - start;
         sleepTime = sleepTime - elapsed;
         if (sleepTime <= 0) {
           minimumPurgeTime = elapsed;
