@@ -1637,7 +1637,7 @@ public class InitialImageOperation  {
               }
             }
             if (this.checkTombstoneVersions && this.versionVector != null && rgn.concurrencyChecksEnabled) {
-              synchronized(rgn.getCache().getTombstoneService().blockGCLock) {
+              synchronized(rgn.getCache().getTombstoneService().getBlockGCLock()) {
               if (goWithFullGII(rgn, this.versionVector)) {
                 if (isGiiDebugEnabled) {
                   logger.trace(LogMarker.GII, "have to do fullGII");

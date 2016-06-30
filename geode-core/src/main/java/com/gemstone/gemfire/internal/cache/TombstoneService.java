@@ -111,12 +111,9 @@ public class TombstoneService {
    * two sweepers, one for replicated regions (including PR buckets) and one for
    * other regions.  They have different timeout intervals.
    */
-  private final TombstoneSweeper replicatedTombstoneSweeper;
-  private final TombstoneSweeper nonReplicatedTombstoneSweeper;
+  private final ReplicateTombstoneSweeper replicatedTombstoneSweeper;
+  private final NonReplicateTombstoneSweeper nonReplicatedTombstoneSweeper;
 
-  public final Object blockGCLock = new Object();
-  private int progressingDeltaGIICount; 
-  
   public static TombstoneService initialize(GemFireCacheImpl cache) {
     TombstoneService instance = new TombstoneService(cache);
 //    cache.getResourceManager().addResourceListener(instance);  experimental
@@ -176,21 +173,15 @@ public class TombstoneService {
   }
   
   public int getGCBlockCount() {
-    synchronized(this.blockGCLock) {
-      return this.progressingDeltaGIICount;
-    }
+    return replicatedTombstoneSweeper.getGCBlockCount();
   }
    
   public int incrementGCBlockCount() {
-    synchronized(this.blockGCLock) {
-      return ++this.progressingDeltaGIICount;
-    }
+    return replicatedTombstoneSweeper.incrementGCBlockCount();
   }
   
   public int decrementGCBlockCount() {
-    synchronized(this.blockGCLock) {
-      return --this.progressingDeltaGIICount;
-    }
+    return replicatedTombstoneSweeper.decrementGCBlockCount();
   }
   
   /**
@@ -199,7 +190,7 @@ public class TombstoneService {
    */
   @SuppressWarnings("rawtypes")
   public Set<Object> gcTombstones(LocalRegion r, Map<VersionSource, Long> regionGCVersions, boolean needsKeys) {
-    synchronized(this.blockGCLock) {
+    synchronized(getBlockGCLock()) {
       int count = getGCBlockCount(); 
       if (count > 0) {
         // if any delta GII is on going as provider at this member, not to do tombstone GC
@@ -311,6 +302,9 @@ public class TombstoneService {
     return "Destroyed entries GC service.  Replicate Queue=" + this.replicatedTombstoneSweeper
     + " Non-replicate Queue=" + this.nonReplicatedTombstoneSweeper;
   }  
+  public Object getBlockGCLock() {
+    return this.replicatedTombstoneSweeper.getBlockGCLock();
+  }
   private static class Tombstone extends CompactVersionHolder {
     // tombstone overhead size
     public static int PER_TOMBSTONE_OVERHEAD = ReflectionSingleObjectSizer.REFERENCE_SIZE // queue's reference to the tombstone
@@ -403,6 +397,9 @@ public class TombstoneService {
      */
     private volatile boolean batchExpirationInProgress;
     
+    private final Object blockGCLock = new Object();
+    private int progressingDeltaGIICount; 
+    
     /**
      * A test hook to force a call to expireBatch.
      * The call will only happen after testHook_forceExpirationCount
@@ -421,16 +418,43 @@ public class TombstoneService {
       this.expiredTombstones = new ArrayList<Tombstone>();
     }
     
+    public int decrementGCBlockCount() {
+      synchronized(getBlockGCLock()) {
+        return --progressingDeltaGIICount;
+      }
+    }
+
+    public int incrementGCBlockCount() {
+      synchronized(getBlockGCLock()) {
+        return ++progressingDeltaGIICount;
+      }
+    }
+
+    public int getGCBlockCount() {
+      synchronized(getBlockGCLock()) {
+        return progressingDeltaGIICount;
+      }
+    }
+
+    public Object getBlockGCLock() {
+      return blockGCLock;
+    }
+
     @Override
     protected boolean scanExpired(Predicate<Tombstone> predicate) {
       boolean result = false;
       long removalSize = 0;
-      for (int idx=expiredTombstones.size()-1; idx >= 0; idx--) {
-        Tombstone t = expiredTombstones.get(idx);
-        if (predicate.test(t)) {
-          removalSize += t.getSize();
-          expiredTombstones.remove(idx);
-          result = true;
+      synchronized(getBlockGCLock()) {
+        // Iterate in reverse order to optimize lots of removes.
+        // Since expiredTombstones is an ArrayList removing from
+        // low indexes requires moving everything at a higher index down.
+        for (int idx=expiredTombstones.size()-1; idx >= 0; idx--) {
+          Tombstone t = expiredTombstones.get(idx);
+          if (predicate.test(t)) {
+            removalSize += t.getSize();
+            expiredTombstones.remove(idx);
+            result = true;
+          }
         }
       }
       updateMemoryEstimate(-removalSize);
@@ -444,8 +468,8 @@ public class TombstoneService {
         // because the sweeper thread will just try again after its next sleep (max sleep is 10 seconds)
         return;
       }
-      synchronized(cache.getTombstoneService().blockGCLock) {
-        int count = cache.getTombstoneService().getGCBlockCount();
+      synchronized(getBlockGCLock()) {
+        int count = getGCBlockCount();
         if (count > 0) {
           // if any delta GII is on going as provider at this member, not to do tombstone GC
           if (logger.isDebugEnabled()) {
@@ -615,9 +639,10 @@ public class TombstoneService {
 
     @Override
     boolean forceBatchExpirationForTests(int count) throws InterruptedException {
-      // TODO: shouldn't this method make sure the sweeper is not currently doing
-      // batch expire? If it is then the latch will get counted down early.
-      testHook_forceBatchExpireCall = new CountDownLatch(1);
+      // sync on blockGCLock since expireBatch syncs on it
+      synchronized(getBlockGCLock()) {
+        testHook_forceBatchExpireCall = new CountDownLatch(1);
+      }
       try {
         synchronized(this) {
           testHook_forceExpirationCount += count;
