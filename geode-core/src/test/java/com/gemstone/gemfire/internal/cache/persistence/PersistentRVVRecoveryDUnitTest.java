@@ -266,7 +266,7 @@ public class PersistentRVVRecoveryDUnitTest extends PersistentReplicatedTestBase
       
       @Override
       public void run2() throws CacheException {
-        long replicatedTombstoneTomeout = TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT;
+        long replicatedTombstoneTomeout = TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT;
         int expiriredTombstoneLimit = TombstoneService.EXPIRED_TOMBSTONE_LIMIT;
         
         try {
@@ -302,7 +302,7 @@ public class PersistentRVVRecoveryDUnitTest extends PersistentReplicatedTestBase
           // right away when they are gIId based on their original timestamp.
           Wait.pause((int) TEST_REPLICATED_TOMBSTONE_TIMEOUT);
 
-          TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT = TEST_REPLICATED_TOMBSTONE_TIMEOUT;
+          TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT = TEST_REPLICATED_TOMBSTONE_TIMEOUT;
           TombstoneService.EXPIRED_TOMBSTONE_LIMIT = entryCount;
           // Do region GII
           region = createRegion(vm0);
@@ -334,7 +334,7 @@ public class PersistentRVVRecoveryDUnitTest extends PersistentReplicatedTestBase
 
           cache.close();
         } finally {
-          TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT = replicatedTombstoneTomeout;
+          TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT = replicatedTombstoneTomeout;
           TombstoneService.EXPIRED_TOMBSTONE_LIMIT = expiriredTombstoneLimit;
         }    
       }

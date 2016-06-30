@@ -8547,13 +8547,13 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
     Host host = Host.getHost(0);
     VM vm0 = host.getVM(0);
     VM vm1 = host.getVM(1);
-    final int numEntries = 1000;
+    final int numEntries = 100;
     
     // create replicated regions in VM 0 and 1, then perform concurrent ops
     // on the same key while creating the region in VM2.  Afterward make
     // sure that all three regions are consistent
-    final long oldServerTimeout = TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT;
-    final long oldClientTimeout = TombstoneService.CLIENT_TOMBSTONE_TIMEOUT;
+    final long oldServerTimeout = TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT;
+    final long oldClientTimeout = TombstoneService.NON_REPLICATE_TOMBSTONE_TIMEOUT;
     final int oldExpiredTombstoneLimit = TombstoneService.EXPIRED_TOMBSTONE_LIMIT;
     final boolean oldIdleExpiration = TombstoneService.IDLE_EXPIRATION;
     final double oldLimit = TombstoneService.GC_MEMORY_THRESHOLD;
@@ -8561,9 +8561,9 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
       SerializableRunnable setTimeout = new SerializableRunnable() {
         @Override
         public void run() {
-          TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT = 20000;
-          TombstoneService.CLIENT_TOMBSTONE_TIMEOUT = 19000;
-          TombstoneService.EXPIRED_TOMBSTONE_LIMIT = 1000;
+          TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT = 2000;
+          TombstoneService.NON_REPLICATE_TOMBSTONE_TIMEOUT = 1900;
+          TombstoneService.EXPIRED_TOMBSTONE_LIMIT = numEntries;
           TombstoneService.IDLE_EXPIRATION = true;
           TombstoneService.GC_MEMORY_THRESHOLD = 0;  // turn this off so heap profile won't cause test to fail
         }
@@ -8630,7 +8630,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
             }
           };
           try {
-            Wait.waitForCriterion(waitForExpiration, TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT+10000, 1000, true);
+            Wait.waitForCriterion(waitForExpiration, TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT+10000, 1000, true);
           } catch (AssertionError e) {
             CCRegion.dumpBackingMap();
             com.gemstone.gemfire.test.dunit.LogWriterUtils.getLogWriter().info("tombstone service state: " + CCRegion.getCache().getTombstoneService());
@@ -8661,7 +8661,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
                   + " tombstones left out of " + origCount + " initial tombstones";
               }
             };
-            Wait.waitForCriterion(waitForExpiration, TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT+10000, 1000, true);
+            Wait.waitForCriterion(waitForExpiration, TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT+10000, 1000, true);
             logger.debug("creating tombstones.  current count={}", CCRegion.getTombstoneCount());
             for (int i=0; i<numEntries; i++) {
               CCRegion.create("cckey" + i, i);
@@ -8749,8 +8749,8 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
       SerializableRunnable resetTimeout = new SerializableRunnable() {
         @Override
         public void run() {
-          TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT = oldServerTimeout;
-          TombstoneService.CLIENT_TOMBSTONE_TIMEOUT = oldClientTimeout;
+          TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT = oldServerTimeout;
+          TombstoneService.NON_REPLICATE_TOMBSTONE_TIMEOUT = oldClientTimeout;
           TombstoneService.EXPIRED_TOMBSTONE_LIMIT = oldExpiredTombstoneLimit;
           TombstoneService.IDLE_EXPIRATION = oldIdleExpiration;
           TombstoneService.GC_MEMORY_THRESHOLD = oldLimit;

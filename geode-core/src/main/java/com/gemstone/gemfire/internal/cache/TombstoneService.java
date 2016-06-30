@@ -53,19 +53,19 @@ public class TombstoneService {
   private static final Logger logger = LogService.getLogger();
   
   /**
-   * The default tombstone expiration period, in milliseconds for replicated
-   * regions.<p>  This is the period over which the destroy operation may
+   * The default tombstone expiration period, in milliseconds for replicates and partitions.
+   * <p>This is the period over which the destroy operation may
    * conflict with another operation.  After this timeout elapses the tombstone
    * is put into a GC set for removal.  Removal is typically triggered by
    * the size of the GC set, but could be influenced by resource managers.
    * 
    * The default is 600,000 milliseconds (10 minutes).
    */
-  public static long REPLICATED_TOMBSTONE_TIMEOUT = Long.getLong(
+  public static long REPLICATE_TOMBSTONE_TIMEOUT = Long.getLong(
       DistributionConfig.GEMFIRE_PREFIX + "tombstone-timeout", 600000L).longValue();
   
   /**
-   * The default tombstone expiration period in millis for non-replicated
+   * The default tombstone expiration period in millis for non-replicate/partition
    * regions.  This tombstone timeout should be shorter than the one for
    * replicated regions and need not be excessively long.  Making it longer
    * than the replicated timeout can cause non-replicated regions to issue
@@ -73,7 +73,7 @@ public class TombstoneService {
    * by others that no longer have the tombstone.<p>
    * The default is 480,000 milliseconds (8 minutes)
    */
-  public static long CLIENT_TOMBSTONE_TIMEOUT = Long.getLong(
+  public static long NON_REPLICATE_TOMBSTONE_TIMEOUT = Long.getLong(
       DistributionConfig.GEMFIRE_PREFIX + "non-replicated-tombstone-timeout", 480000);
   
   /**
@@ -98,6 +98,8 @@ public class TombstoneService {
   
   /** this is a test hook for causing the tombstone service to act as though free memory is low */
   public static boolean FORCE_GC_MEMORY_EVENTS = false;
+  /** maximum time a sweeper will sleep, in milliseconds. */
+  public static long MAX_SLEEP_TIME = 10000;
 
   public final static Object debugSync = new Object();
   public final static boolean DEBUG_TOMBSTONE_COUNT = Boolean
@@ -122,10 +124,8 @@ public class TombstoneService {
   }
   
   private TombstoneService(GemFireCacheImpl cache) {
-    this.replicatedTombstoneSweeper = new TombstoneSweeper(cache, new ConcurrentLinkedQueue<Tombstone>(),
-        REPLICATED_TOMBSTONE_TIMEOUT, true, new AtomicLong());
-    this.nonReplicatedTombstoneSweeper = new TombstoneSweeper(cache, new ConcurrentLinkedQueue<Tombstone>(),
-        CLIENT_TOMBSTONE_TIMEOUT, false, new AtomicLong());
+    this.replicatedTombstoneSweeper = new ReplicateTombstoneSweeper(cache);
+    this.nonReplicatedTombstoneSweeper = new NonReplicateTombstoneSweeper(cache);
     this.replicatedTombstoneSweeper.start();
     this.nonReplicatedTombstoneSweeper.start();
   }
@@ -172,17 +172,7 @@ public class TombstoneService {
    * @param r
    */
   public void unscheduleTombstones(LocalRegion r) {
-    TombstoneSweeper sweeper = this.getSweeper(r);
-    Queue<Tombstone> queue = sweeper.getQueue();
-    long removalSize = 0;
-    for (Iterator<Tombstone> it=queue.iterator(); it.hasNext(); ) {
-      Tombstone t = it.next();
-      if (t.region == r) {
-        it.remove();
-        removalSize += t.getSize();
-      }
-    }
-    sweeper.incQueueSize(-removalSize);
+    getSweeper(r).unscheduleTombstones(r);
   }
   
   public int getGCBlockCount() {
@@ -224,7 +214,7 @@ public class TombstoneService {
     final VersionSource myId = r.getVersionMember();
     final TombstoneSweeper sweeper = getSweeper(r);
     final List<Tombstone> removals = new ArrayList<Tombstone>();
-    sweeper.scanQueue(t -> {
+    sweeper.scanUnexpired(t -> {
       if (t.region == r) {
         VersionSource destroyingMember = t.getMemberID();
         if (destroyingMember == null) {
@@ -233,7 +223,6 @@ public class TombstoneService {
         Long maxReclaimedRV = regionGCVersions.get(destroyingMember);
         if (maxReclaimedRV != null && t.getRegionVersion() <= maxReclaimedRV.longValue()) {
           removals.add(t);
-          sweeper.incQueueSize(-t.getSize());
           return true;
         }
       }
@@ -289,11 +278,10 @@ public class TombstoneService {
     }
     final TombstoneSweeper sweeper = this.getSweeper(r);
     final List<Tombstone> removals = new ArrayList<Tombstone>(tombstoneKeys.size());
-    sweeper.scanQueue(t -> {
+    sweeper.scanUnexpired(t -> {
       if (t.region == r) {
         if (tombstoneKeys.contains(t.entry.getKey())) {
           removals.add(t);
-          sweeper.incQueueSize(-t.getSize());
           return true;
         }
       }
@@ -315,27 +303,13 @@ public class TombstoneService {
    * @return true if the expiration occurred 
    */
   public boolean forceBatchExpirationForTests(int count) throws InterruptedException {
-    this.replicatedTombstoneSweeper.testHook_batchExpired = new CountDownLatch(1);
-    try {
-      synchronized(this.replicatedTombstoneSweeper) {
-        this.replicatedTombstoneSweeper.forceExpirationCount+= count;
-        this.replicatedTombstoneSweeper.notifyAll();
-      }
-
-      //Wait for 30 seconds. If we wait longer, we risk hanging the tests if
-      //something goes wrong.
-      return this.replicatedTombstoneSweeper.testHook_batchExpired.await(30, TimeUnit.SECONDS);
-    } finally {
-      this.replicatedTombstoneSweeper.testHook_batchExpired=null;
-    }
+    return this.replicatedTombstoneSweeper.forceBatchExpirationForTests(count);
   }
 
   @Override
   public String toString() {
-    return "Destroyed entries GC service.  Replicate Queue=" + this.replicatedTombstoneSweeper.getQueue().toString()
-    + " Non-replicate Queue=" + this.nonReplicatedTombstoneSweeper.getQueue().toString()
-    + (this.replicatedTombstoneSweeper.expiredTombstones != null?
-        " expired batch size = " + this.replicatedTombstoneSweeper.expiredTombstones.size() : "");
+    return "Destroyed entries GC service.  Replicate Queue=" + this.replicatedTombstoneSweeper
+    + " Non-replicate Queue=" + this.nonReplicatedTombstoneSweeper;
   }  
   private static class Tombstone extends CompactVersionHolder {
     // tombstone overhead size
@@ -369,46 +343,53 @@ public class TombstoneService {
       return sb.toString();
     }
   }
-  
-  private static class TombstoneSweeper implements Runnable {
-    /**
-     * the expiration time for tombstones in this sweeper
-     */
-    private final long expiryTime;
-    /**
-     * the current tombstones.  These are queued for expiration.  When tombstones
-     * are resurrected they are left in this queue and the sweeper thread
-     * figures out that they are no longer valid tombstones.
-     */
-    private final Queue<Tombstone> tombstones;
-    /**
-     * The size, in bytes, of the queue
-     */
-    private final AtomicLong queueSize;
-    /**
-     * the thread that handles tombstone expiration.  It reads from the
-     * tombstone queue.
-     */
-    private final Thread sweeperThread;
-    /**
-     * whether this sweeper accumulates expired tombstones for batch removal
-     */
-    private final boolean batchMode;
-    /**
-     * A lock protecting the head of the tombstones queue.
-     * Operations that may remove the head need to hold this lock.
-     */
-    private final StoppableReentrantLock queueHeadLock;
+  private static class NonReplicateTombstoneSweeper extends TombstoneSweeper {
+    NonReplicateTombstoneSweeper(GemFireCacheImpl cache) {
+      super(cache, NON_REPLICATE_TOMBSTONE_TIMEOUT, "Non-replicate Region Garbage Collector");
+    }
+
+    @Override
+    protected boolean scanExpired(Predicate<Tombstone> predicate) {
+      return false;
+    }
+    @Override protected void updateStatistics() {
+      cache.getCachePerfStats().setNonReplicatedTombstonesSize(getMemoryEstimate());
+    }
+    @Override protected boolean hasExpired(long msTillHeadTombstoneExpires) {
+      return msTillHeadTombstoneExpires <= 0;
+    }
+    @Override protected void expireTombstone(Tombstone tombstone) {
+      if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
+        logger.trace(LogMarker.TOMBSTONE, "removing expired tombstone {}", tombstone);
+      }
+      updateMemoryEstimate(-tombstone.getSize());
+      tombstone.region.getRegionMap().removeTombstone(tombstone.entry, tombstone, false, true);
+    }
+    @Override
+    public String toString() {
+      return getQueue().toString();
+    }
+    @Override
+    protected void checkExpiredTombstones() {
+    }
+    @Override
+    protected void handleNoUnexpiredTombstones() {
+    }
+    @Override
+    boolean forceBatchExpirationForTests(int count) throws InterruptedException {
+      return true;
+    }
+    @Override
+    protected void beforeSleepChecks() {
+    }
+  }
+
+  private static class ReplicateTombstoneSweeper extends TombstoneSweeper {
     /**
      * tombstones that have expired and are awaiting batch removal.  This
      * variable is only accessed by the sweeper thread and so is not guarded
      */
     private final List<Tombstone> expiredTombstones;
-    
-    /**
-     * count of entries to forcibly expire due to memory events
-     */
-    private int forceExpirationCount = 0;
     
     /**
      * Force batch expiration
@@ -423,132 +404,38 @@ public class TombstoneService {
     private volatile boolean batchExpirationInProgress;
     
     /**
-     * A test hook to force expiration of tombstones.
+     * A test hook to force a call to expireBatch.
+     * The call will only happen after testHook_forceExpirationCount
+     * goes to zero.
+     * This latch is counted down at the end of expireBatch.
      * See @{link {@link TombstoneService#forceBatchExpirationForTests(int)}
      */
-    private CountDownLatch testHook_batchExpired;
-
+    private CountDownLatch testHook_forceBatchExpireCall;
     /**
-     * the cache that owns all of the tombstones in this sweeper
+     * count of tombstones to forcibly expire
      */
-    private final GemFireCacheImpl cache;
-    
-    private volatile boolean isStopped;
-    
-    TombstoneSweeper(GemFireCacheImpl cache,
-        Queue<Tombstone> tombstones,
-        long expiryTime,
-        boolean batchMode,
-        AtomicLong queueSize) {
-      this.cache = cache;
-      this.expiryTime = expiryTime;
-      this.tombstones = tombstones;
-      this.queueSize = queueSize;
-      this.batchMode = batchMode;
-      if (batchMode) {
-        this.expiredTombstones = new ArrayList<Tombstone>();
-      } else {
-        this.expiredTombstones = null;
-      }
-      this.queueHeadLock = new StoppableReentrantLock(cache.getCancelCriterion());
-      this.sweeperThread = new Thread(LoggingThreadGroup.createThreadGroup("Destroyed Entries Processors", logger), this);
-      this.sweeperThread.setDaemon(true);
-      String product = "GemFire";
-      String threadName = product + " Garbage Collection Thread " + (batchMode ? "1" : "2");
-      this.sweeperThread.setName(threadName);
-    }
+    private int testHook_forceExpirationCount = 0;
 
-    /**
-     * @return true if predicate ever returned true
-     */
-    public boolean scanQueue(Predicate<Tombstone> predicate) {
-      boolean result = false;
-      lockQueueHead();
-      try {
-        for (Iterator<Tombstone> it=getQueue().iterator(); it.hasNext(); ) {
-          Tombstone t = it.next();
-          if (predicate.test(t)) {
-            it.remove();
-            result = true;
-          }
-        }
-      } finally {
-        unlockQueueHead();
-      }
-      return result;
+    ReplicateTombstoneSweeper(GemFireCacheImpl cache) {
+      super(cache, REPLICATE_TOMBSTONE_TIMEOUT, "Replicate/Partition Region Garbage Collector");
+      this.expiredTombstones = new ArrayList<Tombstone>();
     }
     
-    /**
-     * @return true if predicate ever returned true
-     */
-    public boolean scanBatch(Predicate<Tombstone> predicate) {
+    @Override
+    protected boolean scanExpired(Predicate<Tombstone> predicate) {
       boolean result = false;
-      if (batchMode) {
-        for (int idx=expiredTombstones.size()-1; idx >= 0; idx--) {
-          Tombstone t = expiredTombstones.get(idx);
-          if (predicate.test(t)) {
-            expiredTombstones.remove(idx);
-            result = true;
-          }
+      long removalSize = 0;
+      for (int idx=expiredTombstones.size()-1; idx >= 0; idx--) {
+        Tombstone t = expiredTombstones.get(idx);
+        if (predicate.test(t)) {
+          removalSize += t.getSize();
+          expiredTombstones.remove(idx);
+          result = true;
         }
       }
+      updateMemoryEstimate(-removalSize);
       return result;
     }
-    
-    /**
-     * @return true if predicate ever returned true
-     */
-    public boolean scanQueueAndBatch(Predicate<Tombstone> predicate) {
-      return scanQueue(predicate) || scanBatch(predicate);
-    }
-
-    synchronized void start() {
-      this.sweeperThread.start();
-    }
-
-    synchronized void stop() {
-      this.isStopped = true;
-      if (this.sweeperThread != null) {
-        notifyAll();
-      }
-      try {
-        this.sweeperThread.join(100);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-      }
-      getQueue().clear();
-    }
-
-    public void lockQueueHead() {
-      this.queueHeadLock.lock();
-    }
-    public void unlockQueueHead() {
-      this.queueHeadLock.unlock();
-    }
-
-    public void incQueueSize(long delta) {
-      this.queueSize.addAndGet(delta);
-    }
-
-    public Queue<Tombstone> getQueue() {
-      return this.tombstones;
-    }
-
-    void scheduleTombstone(Tombstone ts) {
-      this.tombstones.add(ts);
-      incQueueSize(ts.getSize());
-    }
-    
-    /** if we should GC the batched tombstones, this method will initiate the operation */
-    private void processBatch() {
-      if (this.forceBatchExpiration 
-          || this.expiredTombstones.size() >= EXPIRED_TOMBSTONE_LIMIT
-          || testHook_batchExpired != null) {
-        this.forceBatchExpiration = false;
-        expireBatch();
-      }
-    }
-    
     /** expire a batch of tombstones */
     private void expireBatch() {
       // fix for bug #46087 - OOME due to too many GC threads
@@ -581,17 +468,12 @@ public class TombstoneService {
         //Update the GC RVV for all of the affected regions.
         //We need to do this so that we can persist the GC RVV before
         //we start removing entries from the map.
-        {
-          long removalSize = 0;
-          for (Tombstone t: expiredTombstones) {
-            removalSize += t.getSize();
-            DistributedRegion tr = (DistributedRegion)t.region;
-            tr.getVersionVector().recordGCVersion(t.getMemberID(), t.getRegionVersion());
-            if (!reapedKeys.containsKey(tr)) {
-              reapedKeys.put(tr, Collections.emptySet());
-            }
+        for (Tombstone t: expiredTombstones) {
+          DistributedRegion tr = (DistributedRegion)t.region;
+          tr.getVersionVector().recordGCVersion(t.getMemberID(), t.getRegionVersion());
+          if (!reapedKeys.containsKey(tr)) {
+            reapedKeys.put(tr, Collections.emptySet());
           }
-          incQueueSize(-removalSize);
         }
 
         for (DistributedRegion r: reapedKeys.keySet()) {
@@ -608,7 +490,7 @@ public class TombstoneService {
         }
 
         //Remove the tombstones from the in memory region map.
-        scanBatch(t -> {
+        scanExpired(t -> {
           // for PR buckets we have to keep track of the keys removed because clients have
           // them all lumped in a single non-PR region
           DistributedRegion tr = (DistributedRegion) t.region;
@@ -642,14 +524,267 @@ public class TombstoneService {
         });
         batchScheduled = true;
       } finally {
-        if(testHook_batchExpired != null) {
-          testHook_batchExpired.countDown();
+        if(testHook_forceBatchExpireCall != null) {
+          testHook_forceBatchExpireCall.countDown();
         }
         if (!batchScheduled) {
           batchExpirationInProgress = false;
         }
       }
       } // sync on deltaGIILock
+    }
+    @Override
+    protected void checkExpiredTombstones() {
+      if (shouldCallExpireBatch()) {
+        this.forceBatchExpiration = false;
+        expireBatch();
+      }
+      checkIfBatchExpirationShouldBeForced();
+    }
+    private boolean shouldCallExpireBatch() {
+      if (testHook_forceExpirationCount > 0) {
+        return false;
+      }
+      if (forceBatchExpiration) {
+        return true;
+      }
+      if (testHook_forceBatchExpireCall != null) {
+        return true;
+      }
+      if (expiredTombstones.size() >= EXPIRED_TOMBSTONE_LIMIT) {
+        return true;
+      }
+      return false;
+    }
+    private void testHookIfIdleExpireBatch() {
+      if (IDLE_EXPIRATION && sleepTime >= EXPIRY_TIME && !this.expiredTombstones.isEmpty()) {
+        expireBatch();
+      }
+    }
+    @Override protected void updateStatistics() {
+      cache.getCachePerfStats().setReplicatedTombstonesSize(getMemoryEstimate());
+    }
+    private void checkIfBatchExpirationShouldBeForced() {
+      if (testHook_forceExpirationCount > 0) {
+        return;
+      }
+      if (GC_MEMORY_THRESHOLD <= 0.0) {
+        return;
+      }
+      if (this.batchExpirationInProgress) {
+        return;
+      }
+      if (this.expiredTombstones.size() <= (EXPIRED_TOMBSTONE_LIMIT / 4)) {
+        return;
+      }
+      if (FORCE_GC_MEMORY_EVENTS || isFreeMemoryLow()) {
+        forceBatchExpiration = true;
+        if (logger.isDebugEnabled()) {
+          logger.debug("forcing batch expiration due to low memory conditions");
+        }
+      }
+    }
+    private boolean isFreeMemoryLow() {
+      Runtime rt = Runtime.getRuntime();
+      long freeMemory = rt.freeMemory();
+      long totalMemory = rt.totalMemory();
+      long maxMemory = rt.maxMemory();
+      freeMemory += (maxMemory-totalMemory); // TODO: I think "max-total" is "free" which we already fetched so why += it?
+      return freeMemory / (totalMemory * 1.0) < GC_MEMORY_THRESHOLD; // TODO: why divide by "total" instead of "max"?
+    }
+    @Override protected boolean hasExpired(long msTillHeadTombstoneExpires) {
+      if (testHook_forceExpirationCount > 0) {
+        testHook_forceExpirationCount--;
+        return true;
+      }
+      return msTillHeadTombstoneExpires <= 0;
+    }
+    @Override protected void expireTombstone(Tombstone tombstone) {
+      if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
+        logger.trace(LogMarker.TOMBSTONE, "adding expired tombstone {} to batch", tombstone);
+      }
+      expiredTombstones.add(tombstone);
+    }
+    @Override protected void handleNoUnexpiredTombstones() {
+      testHook_forceExpirationCount = 0;
+    }
+    @Override
+    public String toString() {
+      return getQueue().toString() + " expired batch size = " + expiredTombstones.size();
+    }
+
+    @Override
+    boolean forceBatchExpirationForTests(int count) throws InterruptedException {
+      // TODO: shouldn't this method make sure the sweeper is not currently doing
+      // batch expire? If it is then the latch will get counted down early.
+      testHook_forceBatchExpireCall = new CountDownLatch(1);
+      try {
+        synchronized(this) {
+          testHook_forceExpirationCount += count;
+          notifyAll();
+        }
+        //Wait for 30 seconds. If we wait longer, we risk hanging the tests if
+        //something goes wrong.
+        return testHook_forceBatchExpireCall.await(30, TimeUnit.SECONDS);
+      } finally {
+        testHook_forceBatchExpireCall=null;
+      }
+    }
+
+    @Override
+    protected void beforeSleepChecks() {
+      testHookIfIdleExpireBatch();
+    }
+  }
+  
+  private static abstract class TombstoneSweeper implements Runnable {
+    /**
+     * the expiration time for tombstones in this sweeper
+     */
+    protected final long EXPIRY_TIME;
+    /**
+     * The minimum amount of elapsed time, in millis, between purges.
+     */
+    private final long PURGE_INTERVAL;
+    /**
+     * How long the sweeper should sleep.
+     */
+    protected long sleepTime;
+    /**
+     * Estimate of how long, in millis, it will take to do a purge of obsolete tombstones.
+     */
+    private long minimumPurgeTime = 1;
+    /**
+     * Timestamp of when the last purge was done.
+     */
+    private long lastPurgeTimestamp;
+    /**
+     * the current tombstones.  These are queued for expiration.  When tombstones
+     * are resurrected they are left in this queue and the sweeper thread
+     * figures out that they are no longer valid tombstones.
+     */
+    private final Queue<Tombstone> tombstones;
+    /**
+     * Estimate of the amount of memory used by this sweeper
+     */
+    private final AtomicLong memoryUsedEstimate;
+    /**
+     * the thread that handles tombstone expiration.
+     */
+    private final Thread sweeperThread;
+    /**
+     * A lock protecting the head of the tombstones queue.
+     * Operations that may remove the head need to hold this lock.
+     */
+    private final StoppableReentrantLock queueHeadLock;
+    
+
+    /**
+     * the cache that owns all of the tombstones in this sweeper
+     */
+    protected final GemFireCacheImpl cache;
+    
+    private volatile boolean isStopped;
+    
+    TombstoneSweeper(GemFireCacheImpl cache,
+        long expiryTime,
+        String threadName) {
+      this.cache = cache;
+      this.EXPIRY_TIME = expiryTime;
+      this.PURGE_INTERVAL = Math.min(DEFUNCT_TOMBSTONE_SCAN_INTERVAL, expiryTime);
+      this.tombstones = new ConcurrentLinkedQueue<Tombstone>();
+      this.memoryUsedEstimate = new AtomicLong();
+      this.queueHeadLock = new StoppableReentrantLock(cache.getCancelCriterion());
+      this.sweeperThread = new Thread(LoggingThreadGroup.createThreadGroup("Destroyed Entries Processors", logger), this);
+      this.sweeperThread.setDaemon(true);
+      this.sweeperThread.setName(threadName);
+      this.lastPurgeTimestamp = this.cache.cacheTimeMillis();
+    }
+
+    public void unscheduleTombstones(final LocalRegion r) {
+      this.scanAll(t -> {
+        if (t.region == r) {
+          return true;
+        }
+        return false;
+      });
+    }
+
+    /**
+     * For each unexpired tombstone this sweeper knows about call the predicate.
+     * If the predicate returns true then remove the tombstone from any storage
+     * and update the memory estimate.
+     * @return true if predicate ever returned true
+     */
+    private boolean scanUnexpired(Predicate<Tombstone> predicate) {
+      boolean result = false;
+      long removalSize = 0;
+      lockQueueHead();
+      try {
+        for (Iterator<Tombstone> it=getQueue().iterator(); it.hasNext(); ) {
+          Tombstone t = it.next();
+          if (predicate.test(t)) {
+            removalSize += t.getSize();
+            it.remove();
+            result = true;
+          }
+        }
+      } finally {
+        unlockQueueHead();
+      }
+      updateMemoryEstimate(-removalSize);
+      return result;
+    }
+    
+    /**
+     * For all tombstone this sweeper knows about call the predicate.
+     * If the predicate returns true then remove the tombstone from any storage
+     * and update the memory estimate.
+     * @return true if predicate ever returned true
+     */
+    private boolean scanAll(Predicate<Tombstone> predicate) {
+      return scanUnexpired(predicate) || scanExpired(predicate);
+    }
+
+    synchronized void start() {
+      this.sweeperThread.start();
+    }
+
+    synchronized void stop() {
+      this.isStopped = true;
+      if (this.sweeperThread != null) {
+        notifyAll();
+      }
+      try {
+        this.sweeperThread.join(100);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      getQueue().clear();
+    }
+
+    private void lockQueueHead() {
+      this.queueHeadLock.lock();
+    }
+    private void unlockQueueHead() {
+      this.queueHeadLock.unlock();
+    }
+    
+    public long getMemoryEstimate() {
+      return this.memoryUsedEstimate.get();
+    }
+
+    public void updateMemoryEstimate(long delta) {
+      this.memoryUsedEstimate.addAndGet(delta);
+    }
+
+    protected Queue<Tombstone> getQueue() {
+      return this.tombstones;
+    }
+
+    void scheduleTombstone(Tombstone ts) {
+      this.tombstones.add(ts);
+      updateMemoryEstimate(ts.getSize());
     }
     
     /**
@@ -660,165 +795,18 @@ public class TombstoneService {
      * from the Region until scheduled points in the calendar.  
      */
     public void run() {
-      long minimumRetentionMs = this.expiryTime / 10; // forceExpiration will not work on something younger than this
-      long maximumSleepTime = 10000;
       if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
-        logger.trace(LogMarker.TOMBSTONE, "Destroyed entries sweeper starting with default sleep interval={}", this.expiryTime);
+        logger.trace(LogMarker.TOMBSTONE, "Destroyed entries sweeper starting with default sleep interval={}", this.EXPIRY_TIME);
       }
-      // millis we need to run a scan of queue and batch set for resurrected tombstones
-      long minimumScanTime = 100;
-      // how often to perform the scan
-      long scanInterval = Math.min(DEFUNCT_TOMBSTONE_SCAN_INTERVAL, expiryTime);
-      long lastScanTime = this.cache.cacheTimeMillis();
-      
       while (!isStopped && cache.getCancelCriterion().cancelInProgress() == null) {
-        Throwable problem = null;
         try {
-          if (this.batchMode) {
-            cache.getCachePerfStats().setReplicatedTombstonesSize(queueSize.get());
-          } else {
-            cache.getCachePerfStats().setNonReplicatedTombstonesSize(queueSize.get());
-          }
+          updateStatistics();
           SystemFailure.checkFailure();
-          long now = this.cache.cacheTimeMillis();
-          if (forceExpirationCount <= 0) {
-            if (this.batchMode) {
-              processBatch();
-            }
-            // if we're running out of memory we get a little more aggressive about
-            // the size of the batch we'll expire
-            if (GC_MEMORY_THRESHOLD > 0 && this.batchMode) {
-              // check to see how we're doing on memory
-              Runtime rt = Runtime.getRuntime();
-              long freeMemory = rt.freeMemory();
-              long totalMemory = rt.totalMemory();
-              long maxMemory = rt.maxMemory();
-              freeMemory += (maxMemory-totalMemory);
-              if (FORCE_GC_MEMORY_EVENTS ||
-                  freeMemory / (totalMemory * 1.0) < GC_MEMORY_THRESHOLD) {
-                forceBatchExpiration = !this.batchExpirationInProgress &&
-                       this.expiredTombstones.size() > (EXPIRED_TOMBSTONE_LIMIT / 4);
-                if (forceBatchExpiration) {
-                  if (logger.isDebugEnabled()) {
-                    logger.debug("forcing batch expiration due to low memory conditions");
-                  }
-                }
-                // forcing expiration of tombstones that have not timed out can cause inconsistencies
-                // too easily
-  //              if (this.batchMode) {
-  //                forceExpirationCount = EXPIRED_TOMBSTONE_LIMIT - this.expiredTombstones.size();
-  //              } else {
-  //                forceExpirationCount = EXPIRED_TOMBSTONE_LIMIT;
-  //              }
-  //              maximumSleepTime = 1000;
-              }
-            }
-          }
-          this.lockQueueHead();
-          Tombstone headTombstone = tombstones.peek();
-          long sleepTime = 0;
-          try {
-            if (headTombstone == null) {
-              if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
-                logger.trace(LogMarker.TOMBSTONE, "queue is empty - will sleep");
-              }
-              forceExpirationCount = 0;
-              sleepTime = expiryTime;
-            } else {
-              if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
-                logger.trace(LogMarker.TOMBSTONE, "head tombstone is {}", headTombstone);
-              }
-              boolean expireHeadTombstone = false;
-              long msTillHeadTombstoneExpires = headTombstone.getVersionTimeStamp() + expiryTime - now;
-              if (forceExpirationCount > 0) {
-                if (msTillHeadTombstoneExpires <= minimumRetentionMs && msTillHeadTombstoneExpires > 0) {
-                  sleepTime = msTillHeadTombstoneExpires;
-                } else {
-                  forceExpirationCount--;
-                  expireHeadTombstone = true;
-                }
-              } else if (msTillHeadTombstoneExpires > 0) {
-                sleepTime = msTillHeadTombstoneExpires;
-              } else {
-                expireHeadTombstone = true;
-              }
-              if (expireHeadTombstone) {
-                try {
-                  if (batchMode) {
-                    if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
-                      logger.trace(LogMarker.TOMBSTONE, "adding expired tombstone {} to batch", headTombstone);
-                    }
-                    expiredTombstones.add(headTombstone);
-                  } else {
-                    if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
-                      logger.trace(LogMarker.TOMBSTONE, "removing expired tombstone {}", headTombstone);
-                    }
-                    incQueueSize(-headTombstone.getSize());
-                    headTombstone.region.getRegionMap().removeTombstone(headTombstone.entry, headTombstone, false, true);
-                  }
-                  tombstones.remove();
-                } catch (CancelException e) {
-                  return;
-                } catch (Exception e) {
-                  logger.warn(LocalizedMessage.create(LocalizedStrings.GemFireCacheImpl_TOMBSTONE_ERROR), e);
-                }
-              }
-            }
-          } finally {
-            this.unlockQueueHead();
-          }
-          if (sleepTime > 0) {
-            // initial sleeps could be very long, so we reduce the interval to allow
-            // this thread to periodically sweep up tombstones for resurrected entries
-            sleepTime = Math.min(sleepTime, scanInterval);
-            if (sleepTime > minimumScanTime  &&  (now - lastScanTime) > scanInterval) {
-              lastScanTime = now;
-              long start = now;
-              // see if any have been superseded
-              boolean scanHit = scanQueueAndBatch(tombstone -> {
-                if (tombstone.region.getRegionMap().isTombstoneNotNeeded(tombstone.entry, tombstone.getEntryVersion())) {
-                  if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
-                    logger.trace(LogMarker.TOMBSTONE, "removing obsolete tombstone: {}", tombstone);
-                  }
-                  incQueueSize(-tombstone.getSize());
-                  return true;
-                }
-                return false;
-              });
-              if (scanHit) {
-                sleepTime = 0;
-              }
-              if (sleepTime > 0) {
-                long elapsed = this.cache.cacheTimeMillis() - start;
-                sleepTime = sleepTime - elapsed;
-                if (sleepTime <= 0) {
-                  minimumScanTime = elapsed;
-                  continue;
-                }
-              }
-            }
-            // test hook:  if there are expired tombstones and nothing else is expiring soon,
-            // perform distributed tombstone GC
-            if (batchMode && IDLE_EXPIRATION && sleepTime >= expiryTime && !this.expiredTombstones.isEmpty()) {
-              expireBatch();
-            }
-            if (sleepTime > 0) {
-              try {
-                sleepTime = Math.min(sleepTime, maximumSleepTime);
-                if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
-                  logger.trace(LogMarker.TOMBSTONE, "sleeping for {}", sleepTime);
-                }
-                synchronized(this) {
-                  if(isStopped) {
-                    return;
-                  }
-                  this.wait(sleepTime);
-                }
-              } catch (InterruptedException e) {
-                return;
-              }
-            }
-          } // sleepTime > 0
+          final long now = this.cache.cacheTimeMillis();
+          checkExpiredTombstones();
+          checkOldestUnexpired(now);
+          purgeObsoleteTombstones(now);
+          doSleep();
         } catch (CancelException e) {
           break;
         } catch (VirtualMachineError err) { // GemStoneAddition
@@ -828,12 +816,122 @@ public class TombstoneService {
           throw err;
         } catch (Throwable e) {
           SystemFailure.checkFailure();
-          problem = e;
-        }
-        if (problem != null) {
-          logger.fatal(LocalizedMessage.create(LocalizedStrings.TombstoneService_UNEXPECTED_EXCEPTION), problem);
+          logger.fatal(LocalizedMessage.create(LocalizedStrings.TombstoneService_UNEXPECTED_EXCEPTION), e);
         }
       } // while()
     } // run()
+
+    private void doSleep() {
+      if (sleepTime <= 0) {
+        return;
+      }
+      beforeSleepChecks();
+      sleepTime = Math.min(sleepTime, MAX_SLEEP_TIME);
+      if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
+        logger.trace(LogMarker.TOMBSTONE, "sleeping for {}", sleepTime);
+      }
+      synchronized(this) {
+        if (isStopped) {
+          return;
+        }
+        try {
+          this.wait(sleepTime);
+        } catch (InterruptedException e) {
+        }
+      }
+    }
+
+   private void purgeObsoleteTombstones(final long now) {
+      if (minimumPurgeTime > sleepTime) {
+        // the purge might take minimumScanTime
+        // and we have something to do sooner
+        // than that so return
+        return;
+      }
+      if ((now - lastPurgeTimestamp) < PURGE_INTERVAL) {
+        // the time since the last purge
+        // is less than the configured interval
+        // so return
+        return;
+      }
+      lastPurgeTimestamp = now;
+      long start = now;
+      // see if any have been superseded
+      boolean removedObsoleteTombstone = scanAll(tombstone -> {
+        if (tombstone.region.getRegionMap().isTombstoneNotNeeded(tombstone.entry, tombstone.getEntryVersion())) {
+          if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
+            logger.trace(LogMarker.TOMBSTONE, "removing obsolete tombstone: {}", tombstone);
+          }
+          return true;
+        }
+        return false;
+      });
+      if (removedObsoleteTombstone) {
+        sleepTime = 0;
+      } else {
+        long elapsed = this.cache.cacheTimeMillis() - start;
+        sleepTime = sleepTime - elapsed;
+        if (sleepTime <= 0) {
+          minimumPurgeTime = elapsed;
+        }
+      }
+    }
+
+    /**
+     * See if the oldest unexpired tombstone should be expired.
+     */
+    private void checkOldestUnexpired(long now) {
+      sleepTime = 0;
+      lockQueueHead();
+      Tombstone oldest = tombstones.peek();
+      try {
+        if (oldest == null) {
+          if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
+            logger.trace(LogMarker.TOMBSTONE, "queue is empty - will sleep");
+          }
+          handleNoUnexpiredTombstones();
+          sleepTime = EXPIRY_TIME;
+        } else {
+          if (logger.isTraceEnabled(LogMarker.TOMBSTONE)) {
+            logger.trace(LogMarker.TOMBSTONE, "oldest unexpired tombstone is {}", oldest);
+          }
+          long msTillHeadTombstoneExpires = oldest.getVersionTimeStamp() + EXPIRY_TIME - now;
+          if (hasExpired(msTillHeadTombstoneExpires)) {
+            try {
+              tombstones.remove();
+              expireTombstone(oldest);
+            } catch (CancelException e) {
+              // nothing needed
+            } catch (Exception e) {
+              logger.warn(LocalizedMessage.create(LocalizedStrings.GemFireCacheImpl_TOMBSTONE_ERROR), e);
+            }
+          } else {
+            sleepTime = msTillHeadTombstoneExpires;
+          }
+        }
+      } finally {
+        unlockQueueHead();
+      }
+    }
+
+    /**
+     * For each expired tombstone this sweeper knows about call the predicate.
+     * If the predicate returns true then remove the tombstone from any storage
+     * and update the memory estimate.
+     * <p>Some sweepers batch up the expired tombstones to gc them later.
+     * @return true if predicate ever returned true
+     */
+    protected abstract boolean scanExpired(Predicate<Tombstone> predicate);
+    /** see if the already expired tombstones should be processed */
+    protected abstract void checkExpiredTombstones();
+    protected abstract void handleNoUnexpiredTombstones();
+    protected abstract boolean hasExpired(long msTillTombstoneExpires);
+    protected abstract void expireTombstone(Tombstone tombstone);
+    protected abstract void updateStatistics();
+    /**
+     * Do anything needed before the sweeper sleeps.
+     */
+    protected abstract void beforeSleepChecks();
+    abstract boolean forceBatchExpirationForTests(int count) throws InterruptedException;
   } // class TombstoneSweeper
 }

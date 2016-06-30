@@ -2086,7 +2086,7 @@ public class GIIDeltaDUnitTest extends JUnit4CacheTestCase {
   protected void changeTombstoneTimout(VM vm, final long value) {
     SerializableRunnable change = new SerializableRunnable() {
       public void run() {
-        TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT = value;
+        TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT = value;
       }
     };
     vm.invoke(change);
@@ -2493,13 +2493,13 @@ public class GIIDeltaDUnitTest extends JUnit4CacheTestCase {
           assertTrue(entry != null && entry.getRegionEntry().isTombstone());
         }
         
-        System.out.println("GGG:new timeout="+TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT);
+        System.out.println("GGG:new timeout="+TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT);
         if (entry == null || !entry.getRegionEntry().isTombstone()) {
           return (false == expectExist);
         } else {
           long ts = entry.getRegionEntry().getVersionStamp().getVersionTimeStamp();
           if (expectExpired) {
-            return (ts + TombstoneService.REPLICATED_TOMBSTONE_TIMEOUT <= ((GemFireCacheImpl)cache).cacheTimeMillis()); // use MAX_WAIT as timeout
+            return (ts + TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT <= ((GemFireCacheImpl)cache).cacheTimeMillis()); // use MAX_WAIT as timeout
           } else {
             return (true == expectExist);
           }
