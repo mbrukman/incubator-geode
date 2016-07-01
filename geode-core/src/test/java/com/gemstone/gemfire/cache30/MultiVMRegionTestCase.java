@@ -8626,11 +8626,11 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
             @Override
             public String description() {
               return "Waiting for all tombstones to expire.  There are now " + CCRegion.getTombstoneCount()
-              + " tombstones left out of " + count + " initial tombstones";
+              + " tombstones left out of " + count + " initial tombstones. " + CCRegion.getCache().getTombstoneService();
             }
           };
           try {
-            Wait.waitForCriterion(waitForExpiration, TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT+10000, 1000, true);
+            Wait.waitForCriterion(waitForExpiration, TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT+10000, 100, true);
           } catch (AssertionError e) {
             CCRegion.dumpBackingMap();
             com.gemstone.gemfire.test.dunit.LogWriterUtils.getLogWriter().info("tombstone service state: " + CCRegion.getCache().getTombstoneService());
@@ -8638,11 +8638,6 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
           }
         }
       });
-
-      // Now check to see if tombstones are resurrected by a put/create.
-      // The entries should be created okay and the callback should be afterCreate.
-      // The tombstone count won't go down until the entries are swept, but then
-      // the count should fall to zero.
 
       vm0.invoke(new SerializableRunnable("create/destroy entries and check tombstone count") {
         @Override
@@ -8658,10 +8653,10 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
               @Override
               public String description() {
                 return "Waiting for all tombstones to expire.  There are now " + CCRegion.getTombstoneCount()
-                  + " tombstones left out of " + origCount + " initial tombstones";
+                  + " tombstones left out of " + origCount + " initial tombstones. " + CCRegion.getCache().getTombstoneService();
               }
             };
-            Wait.waitForCriterion(waitForExpiration, TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT+10000, 1000, true);
+            Wait.waitForCriterion(waitForExpiration, TombstoneService.REPLICATE_TOMBSTONE_TIMEOUT+10000, 100, true);
             logger.debug("creating tombstones.  current count={}", CCRegion.getTombstoneCount());
             for (int i=0; i<numEntries; i++) {
               CCRegion.create("cckey" + i, i);
@@ -8669,7 +8664,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
             }
             logger.debug("done creating tombstones.  current count={}", CCRegion.getTombstoneCount());
             count = CCRegion.getTombstoneCount();
-            assertEquals("expected "+numEntries+" tombstones", numEntries, count);
+            assertEquals(numEntries, count);
             assertEquals(0, CCRegion.size());
             afterCreates = 0;
             AttributesMutator m = CCRegion.getAttributesMutator();
@@ -8695,8 +8690,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
       vm1.invoke(new SerializableRunnable("check tombstone count and install listener") {
         @Override
         public void run() {
-          long count = CCRegion.getTombstoneCount();
-          assertEquals("expected ten tombstones", numEntries, count);
+          assertEquals(numEntries, CCRegion.getTombstoneCount());
           afterCreates = 0;
           AttributesMutator m = CCRegion.getAttributesMutator();
           m.addCacheListener(new CacheListenerAdapter() {
@@ -8706,6 +8700,11 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
             }
           });
         }});
+
+      // Now check to see if tombstones are resurrected by a create.
+      // The entries should be created okay and the callback should be afterCreate.
+      // The tombstone count won't go down until the entries are swept, but then
+      // the count should fall to zero.
 
       vm0.invoke(new SerializableRunnable("create entries and check afterCreate and tombstone count") {
         @Override
@@ -8721,6 +8720,18 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
             if (CCRegion.getScope().isDistributedNoAck()) {
               sendSerialMessageToAll(); // flush the ops
             }
+            WaitCriterion waitForExpiration = new WaitCriterion() {
+              @Override
+              public boolean done() {
+                return CCRegion.getCache().getTombstoneService().getScheduledTombstoneCount() ==  0;
+              }
+              @Override
+              public String description() {
+                return "Waiting for all scheduled tombstones to be removed.  There are now " + CCRegion.getCache().getTombstoneService().getScheduledTombstoneCount()
+                  + " tombstones left out of " + numEntries + " initial tombstones. " + CCRegion.getCache().getTombstoneService();
+              }
+            };
+            Wait.waitForCriterion(waitForExpiration, 10000, 100, true);
           } catch (CacheException e) {
             fail("while performing create operations", e);
           }
@@ -8734,17 +8745,21 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
           assertEquals("expected zero tombstones", 0, count);
           assertEquals("expected "+numEntries+" afterCreates", numEntries, afterCreates);
           assertEquals(numEntries, CCRegion.size());
+          WaitCriterion waitForExpiration = new WaitCriterion() {
+            @Override
+            public boolean done() {
+              return CCRegion.getCache().getTombstoneService().getScheduledTombstoneCount() ==  0;
+            }
+            @Override
+            public String description() {
+              return "Waiting for all scheduled tombstones to be removed.  There are now " + CCRegion.getCache().getTombstoneService().getScheduledTombstoneCount()
+                + " tombstones left out of " + numEntries + " initial tombstones. " + CCRegion.getCache().getTombstoneService();
+            }
+          };
+          Wait.waitForCriterion(waitForExpiration, 10000, 100, true);
         }
       });
 
-      vm0.invoke(new SerializableRunnable("check region size and tombstone count") {
-        @Override
-        public void run() {
-          long count = CCRegion.getTombstoneCount();
-          assertEquals("expected all tombstones to be expired", 0, count);
-          assertEquals(numEntries, CCRegion.size());
-        }
-      });
     } finally {
       SerializableRunnable resetTimeout = new SerializableRunnable() {
         @Override

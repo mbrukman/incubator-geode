@@ -187,6 +187,13 @@ public class TombstoneService {
     return replicatedTombstoneSweeper.decrementGCBlockCount();
   }
   
+  public long getScheduledTombstoneCount() {
+    long result = 0;
+    result += replicatedTombstoneSweeper.getScheduledTombstoneCount();
+    result += nonReplicatedTombstoneSweeper.getScheduledTombstoneCount();
+    return result;
+  }
+  
   /**
    * remove tombstones from the given region that have region-versions <= those in the given removal map
    * @return a collection of keys removed (only if the region is a bucket - empty otherwise)
@@ -642,7 +649,7 @@ public class TombstoneService {
     }
     @Override
     public String toString() {
-      return getQueue().toString() + " expired batch size = " + expiredTombstones.size();
+      return getQueue().toString() + " batchedExpiredTombstones = " + expiredTombstones.toString();
     }
 
     @Override
@@ -667,6 +674,10 @@ public class TombstoneService {
     @Override
     protected void beforeSleepChecks() {
       testHookIfIdleExpireBatch();
+    }
+    @Override
+    public long getScheduledTombstoneCount() {
+      return super.getScheduledTombstoneCount() + this.expiredTombstones.size();
     }
   }
   
@@ -950,6 +961,10 @@ public class TombstoneService {
       } finally {
         unlockQueueHead();
       }
+    }
+    
+    public long getScheduledTombstoneCount() {
+      return getQueue().size();
     }
 
     /**
