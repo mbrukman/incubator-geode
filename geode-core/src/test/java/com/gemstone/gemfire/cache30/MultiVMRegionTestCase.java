@@ -8542,6 +8542,13 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
     vm3.invoke(() -> this.assertNoClearTimeouts());
   }
   
+  private void checkCCRegionTombstoneCount(String msg, int expected) {
+    int actual = CCRegion.getTombstoneCount();
+    if (expected != actual) {
+      assertEquals(msg + " region tombstone count was " + actual + " expected=" + expected + " TombstoneService=" + CCRegion.getCache().getTombstoneService(),
+          expected, actual);
+    }
+  }
   public void versionTestTombstones() {
     disconnectAllFromDS();
     Host host = Host.getHost(0);
@@ -8601,8 +8608,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
               assertTrue("entry should not exist", !CCRegion.containsKey("cckey"+i));
               assertTrue("entry should not contain a value", !CCRegion.containsValueForKey("cckey"+i));
             }
-            long count = CCRegion.getTombstoneCount();
-            assertEquals("expected "+numEntries+" tombstones", numEntries, count);
+            checkCCRegionTombstoneCount("after destroys in this vm ", numEntries);
             assertTrue("region should not contain a tombstone", !CCRegion.containsValue(Token.TOMBSTONE));
             if (CCRegion.getScope().isDistributedNoAck()) {
               sendSerialMessageToAll(); // flush the ops
@@ -8616,8 +8622,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
       vm1.invoke(new SerializableRunnable("check tombstone count(2)") {
         @Override
         public void run() {
-          final long count = CCRegion.getTombstoneCount();
-          assertEquals("expected "+numEntries+" tombstones", numEntries, count);
+          checkCCRegionTombstoneCount("after destroys in other vm ", numEntries);
           WaitCriterion waitForExpiration = new WaitCriterion() {
             @Override
             public boolean done() {
@@ -8626,7 +8631,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
             @Override
             public String description() {
               return "Waiting for all tombstones to expire.  There are now " + CCRegion.getTombstoneCount()
-              + " tombstones left out of " + count + " initial tombstones. " + CCRegion.getCache().getTombstoneService();
+              + " tombstones left out of " + numEntries + " initial tombstones. " + CCRegion.getCache().getTombstoneService();
             }
           };
           try {
@@ -8642,8 +8647,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
       vm0.invoke(new SerializableRunnable("create/destroy entries and check tombstone count") {
         @Override
         public void run() {
-          long count = CCRegion.getTombstoneCount();
-          final long origCount = count;
+          final int origCount = CCRegion.getTombstoneCount();
           try {
             WaitCriterion waitForExpiration = new WaitCriterion() {
               @Override
@@ -8663,8 +8667,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
               CCRegion.destroy("cckey" + i);
             }
             logger.debug("done creating tombstones.  current count={}", CCRegion.getTombstoneCount());
-            count = CCRegion.getTombstoneCount();
-            assertEquals(numEntries, count);
+            checkCCRegionTombstoneCount("after create+destroy in this vm ", numEntries);
             assertEquals(0, CCRegion.size());
             afterCreates = 0;
             AttributesMutator m = CCRegion.getAttributesMutator();
@@ -8690,7 +8693,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
       vm1.invoke(new SerializableRunnable("check tombstone count and install listener") {
         @Override
         public void run() {
-          assertEquals(numEntries, CCRegion.getTombstoneCount());
+          checkCCRegionTombstoneCount("after create+destroy in other vm ", numEntries);
           afterCreates = 0;
           AttributesMutator m = CCRegion.getAttributesMutator();
           m.addCacheListener(new CacheListenerAdapter() {
@@ -8713,8 +8716,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
             for (int i=0; i<numEntries; i++) {
               CCRegion.create("cckey" + i, i);
             }
-            long count = CCRegion.getTombstoneCount();
-            assertEquals("expected zero tombstones", 0, count);
+            checkCCRegionTombstoneCount("after create in this vm", 0);
             assertEquals("expected "+numEntries+" afterCreates", numEntries, afterCreates);
             assertEquals(numEntries, CCRegion.size());
             if (CCRegion.getScope().isDistributedNoAck()) {
@@ -8741,8 +8743,7 @@ public abstract class MultiVMRegionTestCase extends RegionTestCase {
       vm1.invoke(new SerializableRunnable("check afterCreate and tombstone count") {
         @Override
         public void run() {
-          long count = CCRegion.getTombstoneCount();
-          assertEquals("expected zero tombstones", 0, count);
+          checkCCRegionTombstoneCount("after create in other vm", 0);
           assertEquals("expected "+numEntries+" afterCreates", numEntries, afterCreates);
           assertEquals(numEntries, CCRegion.size());
           WaitCriterion waitForExpiration = new WaitCriterion() {

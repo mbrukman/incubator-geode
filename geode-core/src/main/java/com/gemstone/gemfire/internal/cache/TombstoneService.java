@@ -370,10 +370,6 @@ public class TombstoneService {
       tombstone.region.getRegionMap().removeTombstone(tombstone.entry, tombstone, false, true);
     }
     @Override
-    public String toString() {
-      return getQueue().toString();
-    }
-    @Override
     protected void checkExpiredTombstones() {
     }
     @Override
@@ -649,7 +645,7 @@ public class TombstoneService {
     }
     @Override
     public String toString() {
-      return getQueue().toString() + " batchedExpiredTombstones = " + expiredTombstones.toString();
+      return super.toString() + " batchedExpiredTombstones[" + expiredTombstones.size() + "] = " + expiredTombstones.toString();
     }
 
     @Override
@@ -965,6 +961,11 @@ public class TombstoneService {
     
     public long getScheduledTombstoneCount() {
       return getQueue().size();
+    }
+    
+    @Override
+    public String toString() {
+      return "[" + getQueue().size() + "] " + getQueue().toString();
     }
 
     /**
