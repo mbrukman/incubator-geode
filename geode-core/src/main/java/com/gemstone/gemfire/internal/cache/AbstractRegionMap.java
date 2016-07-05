@@ -3623,9 +3623,6 @@ public abstract class AbstractRegionMap implements RegionMap {
     }
   }
 
-  public final void unscheduleTombstone(RegionEntry re) {
-  }
-  
   /**
    * for testing race conditions between threads trying to apply ops to the
    * same entry

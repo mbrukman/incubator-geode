@@ -104,10 +104,6 @@ public class TombstoneService {
   /** maximum time a sweeper will sleep, in milliseconds. */
   public static long MAX_SLEEP_TIME = 10000;
 
-  public final static Object debugSync = new Object();
-  public final static boolean DEBUG_TOMBSTONE_COUNT = Boolean
-      .getBoolean(DistributionConfig.GEMFIRE_PREFIX + "TombstoneService.DEBUG_TOMBSTONE_COUNT"); // TODO:LOG:replace TombstoneService.DEBUG_TOMBSTONE_COUNT
-
   public static boolean IDLE_EXPIRATION = false; // dunit test hook for forced batch expiration
   
   /**
@@ -621,11 +617,11 @@ public class TombstoneService {
     }
     private boolean isFreeMemoryLow() {
       Runtime rt = Runtime.getRuntime();
-      long freeMemory = rt.freeMemory();
-      long totalMemory = rt.totalMemory();
-      long maxMemory = rt.maxMemory();
-      freeMemory += (maxMemory-totalMemory); // TODO: I think "max-total" is "free" which we already fetched so why += it?
-      return freeMemory / (totalMemory * 1.0) < GC_MEMORY_THRESHOLD; // TODO: why divide by "total" instead of "max"?
+      long unusedMemory = rt.freeMemory(); // "free" is how much space we have allocated that is currently not used
+      long totalMemory = rt.totalMemory(); // "total" is how much space we have allocated
+      long maxMemory = rt.maxMemory(); // "max" is how much space we can allocate
+      unusedMemory += (maxMemory-totalMemory); // "max-total" is how much space we have that has not yet been allocated
+      return unusedMemory / (totalMemory * 1.0) < GC_MEMORY_THRESHOLD;
     }
     @Override protected boolean hasExpired(long msTillHeadTombstoneExpires) {
       if (testHook_forceExpirationCount > 0) {
